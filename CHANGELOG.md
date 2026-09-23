@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.2 (2026-09-23)
+
+### Fixed
+
+- Link the npm package to its GitHub repository and README homepage.
+
 ## 0.1.1 (2026-09-23)
 
 ### Fixed

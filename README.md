@@ -8,8 +8,6 @@ LazyPi is a LazyVim-inspired enhancement layer for Pi: a terminal package-manage
 pi install npm:@qiuyihong/lazypi
 ```
 
-> Until `@qiuyihong/lazypi` is published to npm, develop locally with `npm install` and `pi --extension ./extensions/lazypi.ts`.
-
 Tested against Pi 0.87.1; tests use Node.js 24's TypeScript stripping. Runtime Node requirements follow your Pi installation. Curated Pi packages are **not** npm dependencies of LazyPi.
 
 ## Use

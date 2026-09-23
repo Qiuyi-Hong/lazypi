@@ -1,7 +1,12 @@
 {
   "name": "@qiuyihong/lazypi",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "LazyVim-inspired package manager for Pi",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Qiuyi-Hong/lazypi.git"
+  },
+  "homepage": "https://github.com/Qiuyi-Hong/lazypi/blob/main/README.md",
   "type": "module",
   "license": "MIT",
   "keywords": [
