@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1 (2026-09-23)
+
+### Fixed
+
+- Use the available `@qiuyihong/lazypi` npm package name instead of the unavailable unscoped name.
+
 ## 0.1.0 (2026-09-23)
 
 ### Added
