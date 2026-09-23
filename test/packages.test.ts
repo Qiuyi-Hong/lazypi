@@ -172,7 +172,7 @@ test("custom Pi filters and LazyPi itself cannot be silently disabled", async ()
     () =>
       togglePackage(
         f.settings,
-        { ...inventory(f.settings, f.manager)[0]!, name: "lazypi" },
+        { ...inventory(f.settings, f.manager)[0]!, name: "@qiuyihong/lazypi" },
         false,
       ),
     /vanilla Pi/,

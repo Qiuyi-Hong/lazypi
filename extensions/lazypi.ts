@@ -265,7 +265,7 @@ export default function (pi: ExtensionAPI) {
                 continue;
               await apply(choice.action, entry);
             } else if (choice.action === "remove") {
-              if (entry.name === "lazypi")
+              if (entry.name === "@qiuyihong/lazypi")
                 throw new Error(
                   "Remove LazyPi using vanilla Pi outside this popup.",
                 );

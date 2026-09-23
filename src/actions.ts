@@ -20,7 +20,7 @@ export async function execute(
       local: entry.scope === "project",
     });
   } else if (action === "remove") {
-    if (entry.name === "lazypi")
+    if (entry.name === "@qiuyihong/lazypi")
       throw new Error("Remove LazyPi using vanilla Pi outside this popup.");
     if (
       !(await manager.removeAndPersist(entry.source, {

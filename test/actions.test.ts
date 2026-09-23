@@ -35,6 +35,16 @@ test("native package actions use scoped Pi operations, not npm dependencies or s
   await execute("install", entry, settings, manager);
   await execute("update", entry, settings, manager); // Must not silently enable a disabled package.
   await execute("remove", entry, settings, manager);
+  await assert.rejects(
+    () =>
+      execute(
+        "remove",
+        { ...entry, name: "@qiuyihong/lazypi" },
+        settings,
+        manager,
+      ),
+    /vanilla Pi/,
+  );
   assert.deepEqual(calls, [
     "install npm:example true",
     "flush",

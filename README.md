@@ -5,10 +5,10 @@ LazyPi is a LazyVim-inspired enhancement layer for Pi: a terminal package-manage
 ## Install
 
 ```bash
-pi install npm:lazypi
+pi install npm:@qiuyihong/lazypi
 ```
 
-> Until `lazypi` is published to npm, develop locally with `npm install` and `pi --extension ./extensions/lazypi.ts`.
+> Until `@qiuyihong/lazypi` is published to npm, develop locally with `npm install` and `pi --extension ./extensions/lazypi.ts`.
 
 Tested against Pi 0.87.1; tests use Node.js 24's TypeScript stripping. Runtime Node requirements follow your Pi installation. Curated Pi packages are **not** npm dependencies of LazyPi.
 
@@ -16,7 +16,7 @@ Tested against Pi 0.87.1; tests use Node.js 24's TypeScript stripping. Runtime N
 
 Open `/lazypi`, `/lazypi installed`, `/lazypi enabled`, `/lazypi disabled`, or `/lazypi core` in an interactive Pi session (`/lazypi catalog` remains an alias). Tab switches sections; ↑/↓ or j/k select; Enter shows details; `/` searches; `i` installs; `e` enables; `d` disables; Space toggles; `x` removes; `u` updates; `r` refreshes; Esc closes. Every change shows a confirmation and reloads Pi afterward; reopen `/lazypi` for another operation.
 
-**Core** is the predetermined baseline: `npm:pi-mcp-adapter`, `npm:pi-subagents`, and `npm:pi-web-access`. They remain three independent Pi packages, not dependencies of `lazypi`. On your first `/lazypi`, setup recognizes packages already installed through Pi (user and trusted project scope), including disabled packages, and shows a confirmation plan for **only the missing Core packages**. Accepting installs them sequentially as normal Pi packages (User scope by default, or the original scope when repairing a configured-but-missing package); already installed packages and filters are not changed. Choose **Later** to defer setup until next time, or **Skip setup** to opt out. If all Core packages are already installed, setup completes without prompting. After installation, Pi reloads and you can reopen `/lazypi` to see the updated inventory. `i` also accepts a direct Pi `npm:`, `git:`, or `https://` package source. Choose User or Project scope when the project is trusted; project scope uses `.pi/settings.json` and user scope uses your Pi agent directory's `settings.json` (normally `~/.pi/agent/settings.json`). Uncurated installs are identified as such: third-party extensions execute with your user permissions.
+**Core** is the predetermined baseline: `npm:pi-mcp-adapter`, `npm:pi-subagents`, and `npm:pi-web-access`. They remain three independent Pi packages, not dependencies of `@qiuyihong/lazypi`. On your first `/lazypi`, setup recognizes packages already installed through Pi (user and trusted project scope), including disabled packages, and shows a confirmation plan for **only the missing Core packages**. Accepting installs them sequentially as normal Pi packages (User scope by default, or the original scope when repairing a configured-but-missing package); already installed packages and filters are not changed. Choose **Later** to defer setup until next time, or **Skip setup** to opt out. If all Core packages are already installed, setup completes without prompting. After installation, Pi reloads and you can reopen `/lazypi` to see the updated inventory. `i` also accepts a direct Pi `npm:`, `git:`, or `https://` package source. Choose User or Project scope when the project is trusted; project scope uses `.pi/settings.json` and user scope uses your Pi agent directory's `settings.json` (normally `~/.pi/agent/settings.json`). Uncurated installs are identified as such: third-party extensions execute with your user permissions.
 
 ## Philosophy
 

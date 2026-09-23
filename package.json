@@ -1,5 +1,5 @@
 {
-  "name": "lazypi",
+  "name": "@qiuyihong/lazypi",
   "version": "0.1.0",
   "description": "LazyVim-inspired package manager for Pi",
   "type": "module",

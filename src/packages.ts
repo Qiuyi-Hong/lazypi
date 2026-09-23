@@ -238,7 +238,7 @@ export async function togglePackage(
   entry: Pick<PackageEntry, "source" | "scope" | "state" | "name">,
   enabled: boolean,
 ): Promise<void> {
-  if (entry.name === "lazypi" && !enabled)
+  if (entry.name === "@qiuyihong/lazypi" && !enabled)
     throw new Error("Use vanilla Pi to disable or remove LazyPi itself.");
   if (
     entry.state === "missing" ||
