@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1 (2026-09-24)
+
+### Fixed
+
+- Record Pi TUI and its transitive dependencies as peers in the npm lockfile.
+
 ## 0.2.0 (2026-09-24)
 
 ### Added
