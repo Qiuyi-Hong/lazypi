@@ -11,6 +11,13 @@ import {
 } from "../src/bootstrap.ts";
 import { core } from "../src/catalog.ts";
 import {
+  planExtra,
+  readSelections,
+  requiredBy,
+  saveSelection,
+  type Selection,
+} from "../src/extras.ts";
+import {
   createNative,
   identity,
   inventory,
@@ -24,6 +31,7 @@ import {
   type Choice,
   type Section,
 } from "../src/ui.ts";
+import type { ExtraCategory, PiResourceType } from "../src/extras.ts";
 
 export default function (pi: ExtensionAPI) {
   pi.registerCommand("lazypi", {
@@ -41,12 +49,19 @@ export default function (pi: ExtensionAPI) {
             ? "Disabled"
             : requested === "core" || requested === "catalog"
               ? "Core"
-              : "Installed";
+              : requested === "extras"
+                ? "Extras"
+                : "Installed";
       if (
         requested &&
-        !["installed", "enabled", "disabled", "core", "catalog"].includes(
-          requested,
-        )
+        ![
+          "installed",
+          "enabled",
+          "disabled",
+          "core",
+          "catalog",
+          "extras",
+        ].includes(requested)
       ) {
         ctx.ui.notify(
           `Unknown section: ${args.trim()}. Available: ${sections.join(", ")}.`,
@@ -56,6 +71,8 @@ export default function (pi: ExtensionAPI) {
       }
       let active = section;
       let query = "";
+      let category: ExtraCategory | undefined;
+      let resourceType: PiResourceType | "all" = "all";
       let deferredSetup = false;
       for (;;) {
         try {
@@ -65,6 +82,11 @@ export default function (pi: ExtensionAPI) {
           );
           const items = inventory(settings, manager);
           const agentDir = getAgentDir();
+          const selections = readSelections(
+            agentDir,
+            ctx.cwd,
+            ctx.isProjectTrusted(),
+          );
           let setupPending = false;
           if (!deferredSetup) {
             try {
@@ -166,7 +188,17 @@ export default function (pi: ExtensionAPI) {
           let popup!: ManagerPopup;
           const choice = await ctx.ui.custom<Choice>(
             (tui, theme, _keys, done) => {
-              popup = new ManagerPopup(tui, theme, done, items, active, query);
+              popup = new ManagerPopup(
+                tui,
+                theme,
+                done,
+                items,
+                active,
+                query,
+                selections,
+                category,
+                resourceType,
+              );
               return popup;
             },
             {
@@ -175,12 +207,146 @@ export default function (pi: ExtensionAPI) {
             },
           );
           active = popup.section;
+          category = popup.category;
+          resourceType = popup.resourceType;
           if (choice.action === "close") return;
           if (choice.action === "search") {
             query = (await ctx.ui.input("Search packages", query)) ?? query;
             continue;
           }
           if (choice.action === "refresh") continue;
+          if (
+            choice.action === "extra" &&
+            choice.extra &&
+            choice.enabled !== undefined
+          ) {
+            const extra = choice.extra;
+            const existing = selections.filter((item) => item.id === extra.id);
+            let scope: Scope;
+            if (choice.enabled) {
+              const selected = ctx.isProjectTrusted()
+                ? await ctx.ui.select("Select Extra scope", ["User", "Project"])
+                : "User";
+              if (!selected) continue;
+              scope = selected === "Project" ? "project" : "user";
+            } else {
+              if (!existing.length) {
+                ctx.ui.notify(
+                  `${extra.name} is required by another Extra or is not selected directly.`,
+                  "warning",
+                );
+                continue;
+              }
+              const selected =
+                existing.length > 1
+                  ? await ctx.ui.select(
+                      "Deselect from scope",
+                      existing.map((item) =>
+                        item.scope === "user" ? "User" : "Project",
+                      ),
+                    )
+                  : existing[0]!.scope === "user"
+                    ? "User"
+                    : "Project";
+              if (!selected) continue;
+              scope = selected === "Project" ? "project" : "user";
+            }
+            const selection: Selection = { id: extra.id, scope };
+            const alreadySelected = existing.some(
+              (item) => item.scope === scope,
+            );
+            const operation = planExtra(
+              selection,
+              choice.enabled,
+              selections,
+              items,
+            );
+            if (
+              alreadySelected === choice.enabled &&
+              (!choice.enabled || !operation.install.length)
+            )
+              continue;
+            const summary = choice.enabled
+              ? [
+                  `${alreadySelected ? "Repair" : "Select"} ${extra.name} (${scope}). Required Extras: ${extra.requires?.join(", ") || "none"}.`,
+                  ...operation.install.map(
+                    ({ source, scope }) => `+ ${source} (${scope})`,
+                  ),
+                  ...operation.present.map(
+                    (item) =>
+                      `✓ ${item.source} (${item.scope}, ${item.state}; unchanged)`,
+                  ),
+                  "Existing disabled/custom resource filters remain unchanged.",
+                ]
+              : [
+                  `Deselect ${extra.name} (${scope}).`,
+                  ...operation.kept.map(
+                    ({ source, requiredBy }) =>
+                      `= ${source} kept${requiredBy.length ? `; required by ${requiredBy.join(", ")}` : "; ownership outside LazyPi unknown"}`,
+                  ),
+                  "No Pi packages will be removed or disabled. Remove them explicitly if no longer needed.",
+                ];
+            if (
+              !(await ctx.ui.confirm(
+                "Extra operation plan",
+                summary.join("\n"),
+              ))
+            )
+              continue;
+            const current = createNative(ctx.cwd, ctx.isProjectTrusted());
+            const liveSelections = readSelections(
+              agentDir,
+              ctx.cwd,
+              ctx.isProjectTrusted(),
+            );
+            if (
+              JSON.stringify(liveSelections) !== JSON.stringify(selections) ||
+              JSON.stringify(
+                planExtra(
+                  selection,
+                  choice.enabled,
+                  liveSelections,
+                  inventory(current.settings, current.manager),
+                ).install,
+              ) !== JSON.stringify(operation.install)
+            )
+              throw new Error(
+                "Extra inventory changed; reopen LazyPi to review the new plan.",
+              );
+            const result = await installCore(
+              operation.install,
+              current.manager,
+              current.settings,
+            );
+            if (result.error) {
+              ctx.ui.notify(
+                `Extra install stopped: ${result.error}. Installed this time: ${result.installed.join(", ") || "none"}. Selection unchanged; nothing rolled back.`,
+                "error",
+              );
+              if (result.installed.length) {
+                await ctx.reload();
+                return;
+              }
+              continue;
+            }
+            try {
+              if (!alreadySelected || !choice.enabled)
+                saveSelection(agentDir, ctx.cwd, selection, choice.enabled);
+            } catch (error) {
+              if (!result.installed.length) throw error;
+              ctx.ui.notify(
+                `Packages installed, but Extra selection could not be saved: ${String(error)}. No packages were removed.`,
+                "error",
+              );
+              await ctx.reload();
+              return;
+            }
+            if (result.installed.length) {
+              await ctx.reload();
+              return;
+            }
+            continue;
+          }
 
           const apply = async (
             action: "install" | "remove" | "update" | "enable" | "disable",
@@ -272,7 +438,7 @@ export default function (pi: ExtensionAPI) {
               if (
                 !(await ctx.ui.confirm(
                   "Remove package?",
-                  plan("remove", entry),
+                  `${plan("remove", entry)}\nRequired by: ${requiredBy(entry.source, selections).join(", ") || "no LazyPi selection"}. Selections are not changed.`,
                 ))
               )
                 continue;

@@ -1,0 +1,8 @@
+{
+  "name": "@dietrichgebert/ponytail",
+  "version": "4.10.0",
+  "pi": {
+    "extensions": ["./pi-extension/index.js"],
+    "skills": ["./skills"]
+  }
+}

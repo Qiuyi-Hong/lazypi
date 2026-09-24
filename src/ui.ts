@@ -8,9 +8,29 @@ import {
   type TUI,
 } from "@earendil-works/pi-tui";
 import { core } from "./catalog.ts";
+import {
+  EXTRA_CATEGORIES,
+  RESOURCE_TYPES,
+  extraSources,
+  extras,
+  filterExtras,
+  getExtraCategories,
+  requiredBy,
+  resolveExtras,
+  type Extra,
+  type ExtraCategory,
+  type PiResourceType,
+  type Selection,
+} from "./extras.ts";
 import { identity, type PackageEntry } from "./packages.ts";
 
-export const sections = ["Installed", "Enabled", "Disabled", "Core"] as const;
+export const sections = [
+  "Installed",
+  "Enabled",
+  "Disabled",
+  "Core",
+  "Extras",
+] as const;
 export type Section = (typeof sections)[number];
 export type Choice = {
   action:
@@ -21,9 +41,12 @@ export type Choice = {
     | "disable"
     | "search"
     | "refresh"
+    | "extra"
     | "close";
   entry?: PackageEntry;
   source?: string;
+  extra?: Extra;
+  enabled?: boolean;
 };
 type Row = {
   name: string;
@@ -31,6 +54,9 @@ type Row = {
   state: string;
   entry?: PackageEntry;
   source?: string;
+  extra?: Extra;
+  category?: ExtraCategory;
+  metadata?: string;
 };
 
 export class ManagerPopup implements Component {
@@ -40,8 +66,11 @@ export class ManagerPopup implements Component {
   private theme: Theme;
   private done: (value: Choice) => void;
   private items: PackageEntry[];
+  private selections: Selection[];
   public section: Section;
   private query: string;
+  public category?: ExtraCategory;
+  public resourceType: PiResourceType | "all";
   constructor(
     tui: TUI,
     theme: Theme,
@@ -49,43 +78,99 @@ export class ManagerPopup implements Component {
     items: PackageEntry[],
     section: Section,
     query = "",
+    selections: Selection[] = [],
+    category?: ExtraCategory,
+    resourceType: PiResourceType | "all" = "all",
   ) {
     this.tui = tui;
     this.theme = theme;
     this.done = done;
     this.items = items;
+    this.selections = selections;
     this.section = section;
     this.query = query;
+    this.category = category;
+    this.resourceType = resourceType;
   }
 
   private rows(): Row[] {
     const items: Row[] =
-      this.section === "Core"
-        ? core.map((spec) => {
-            const entry = this.items.find(
-              (item) => identity(item.source) === identity(spec.source),
-            );
-            return {
-              name: spec.name,
-              description: `${spec.category} · ${spec.description}`,
-              state: entry?.state ?? "not installed",
-              entry,
-              source: spec.source,
-            };
-          })
-        : this.items
-            .filter(
-              (item) =>
-                this.section === "Installed" ||
-                item.state === this.section.toLowerCase(),
-            )
-            .map((entry) => ({
-              name: entry.name,
-              description: `${entry.source} · ${entry.scope}`,
-              state: entry.state,
-              entry,
-            }));
-    return rowsFilter(items, this.query);
+      this.section === "Extras"
+        ? !this.category && !this.query
+          ? getExtraCategories().map((category) => ({
+              name: EXTRA_CATEGORIES[category],
+              description: `${filterExtras(extras, category, this.resourceType).length} Extras`,
+              state: "",
+              category,
+            }))
+          : filterExtras(
+              extras,
+              this.category,
+              this.resourceType,
+              this.query,
+            ).map((extra) => {
+              const direct = this.selections.filter(
+                (item) => item.id === extra.id,
+              );
+              const sources = resolveExtras([extra.id]).flatMap(extraSources);
+              const installed = sources.filter((source) =>
+                this.items.some(
+                  (item) =>
+                    item.path && identity(item.source) === identity(source),
+                ),
+              ).length;
+              const installation =
+                installed === sources.length
+                  ? "installed"
+                  : installed
+                    ? "partially installed"
+                    : "not installed";
+              const implied = this.selections.some((item) =>
+                resolveExtras([item.id]).some(
+                  (required) => required.id === extra.id,
+                ),
+              );
+              return {
+                name: extra.name,
+                description: extra.description,
+                category: extra.category,
+                metadata: `${extra.resourceTypes.join(" · ") || "workflow"}  |  ${extra.tags.join(" · ")}`,
+                state: `${
+                  direct.length
+                    ? `selected (${direct.map((item) => item.scope).join(", ")})`
+                    : implied
+                      ? "required"
+                      : "available"
+                } · ${installation}`,
+                extra,
+              };
+            })
+        : this.section === "Core"
+          ? core.map((spec) => {
+              const entry = this.items.find(
+                (item) => identity(item.source) === identity(spec.source),
+              );
+              return {
+                name: spec.name,
+                description: `${spec.category} · ${spec.description}`,
+                state: entry?.state ?? "not installed",
+                entry,
+                source: spec.source,
+              };
+            })
+          : this.items
+              .filter(
+                (item) =>
+                  this.section === "Installed" ||
+                  item.state === this.section.toLowerCase(),
+              )
+              .map((entry) => ({
+                name: entry.name,
+                description: `${entry.source} · ${entry.scope}`,
+                state: entry.state,
+                entry,
+              }));
+    return this.section === "Extras" ? items : rowsFilter(items, this.query);
   }
 
   render(width: number): string[] {
@@ -100,31 +185,70 @@ export class ManagerPopup implements Component {
     const lines = [
       this.theme.fg("accent", line("LazyPi · native Pi packages")),
       line(header),
-      line(`Search: ${this.query || "(press /)"}`),
+      line(
+        this.section === "Extras"
+          ? `Extras${this.category ? ` / ${EXTRA_CATEGORIES[this.category]}` : ""} · Type: ${this.resourceType === "all" ? "All" : `${this.resourceType}s`}`
+          : `Search: ${this.query || "(press /)"}`,
+      ),
+      ...(this.section === "Extras"
+        ? [line(`Search: ${this.query || "(press /)"}`)]
+        : []),
       "",
     ];
     if (this.details && current) {
       const e = current.entry;
-      lines.push(
-        line(current.name),
-        line(current.description),
-        line(`Source: ${e?.source ?? current.source}`),
-        line(
-          `Scope: ${e?.scope ?? "choose at install"} · State: ${current.state}`,
-        ),
-        line(
-          `Version: ${e?.version ?? "unknown"} · Resources: ${e?.resources.join(", ") || "unknown"}`,
-        ),
-        line(
-          `Repository: ${e?.repository ?? "unknown"} · Author: ${e?.author ?? "unknown"}`,
-        ),
-      );
+      lines.push(line(current.name), line(current.description));
+      if (!current.extra)
+        lines.push(
+          line(`Source: ${e?.source ?? current.source}`),
+          line(
+            `Scope: ${e?.scope ?? "choose at install"} · State: ${current.state}`,
+          ),
+          line(
+            `Version: ${e?.version ?? "unknown"} · Resources: ${e?.resources.join(", ") || "unknown"}`,
+          ),
+          line(
+            `Repository: ${e?.repository ?? "unknown"} · Author: ${e?.author ?? "unknown"}`,
+          ),
+        );
+      if (current.extra) {
+        const extra = current.extra;
+        lines.push(
+          line(
+            `Category: ${EXTRA_CATEGORIES[extra.category]} · ${current.state}`,
+          ),
+          line(`Resources: ${extra.resourceTypes.join(", ") || "workflow"}`),
+          line(`Tags: ${extra.tags.join(", ")}`),
+          line(`Requires: ${extra.requires?.join(", ") || "none"}`),
+          line(
+            `Packages: ${
+              resolveExtras([extra.id]).flatMap(extraSources).join(", ") ||
+              "none"
+            }`,
+          ),
+          line("Disabling a selection does not uninstall packages."),
+        );
+      } else if (e || current.source) {
+        lines.push(
+          line(
+            `Required by: ${requiredBy(e?.source ?? current.source!, this.selections).join(", ") || "no LazyPi selection"}`,
+          ),
+        );
+      }
       if (e?.error) lines.push(line(e.error));
     } else if (!rows.length) lines.push(line("No packages in this view."));
     else {
       const visible = Math.max(
         1,
-        Math.min(7, Math.floor((this.tui.terminal.rows - 11) / 2)),
+        Math.min(
+          7,
+          Math.floor(
+            (this.tui.terminal.rows - 12) /
+              (this.section === "Extras" && (this.category || this.query)
+                ? 4
+                : 2),
+          ),
+        ),
       );
       const start = Math.max(
         0,
@@ -137,8 +261,21 @@ export class ManagerPopup implements Component {
         .slice(start, start + visible)
         .entries()) {
         const selected = start + offset === this.selected;
+        if (
+          this.section === "Extras" &&
+          !this.category &&
+          this.query &&
+          item.extra &&
+          item.category &&
+          (offset === 0 || rows[start + offset - 1]?.category !== item.category)
+        )
+          lines.push(
+            this.theme.fg("accent", line(EXTRA_CATEGORIES[item.category])),
+          );
         lines.push(line(`${selected ? "›" : " "} ${item.name}  ${item.state}`));
         lines.push(this.theme.fg("muted", line(`  ${item.description}`)));
+        if (item.metadata)
+          lines.push(this.theme.fg("muted", line(`  ${item.metadata}`)));
       }
       if (rows.length > visible)
         lines.push(line(`${this.selected + 1}/${rows.length}`));
@@ -152,7 +289,9 @@ export class ManagerPopup implements Component {
       this.theme.fg(
         "muted",
         line(
-          "i install · e enable · d disable · Space toggle · x remove · u update · r reload · Esc close",
+          this.section === "Extras"
+            ? "Enter category/details · f filter type · Space toggle · i install/select · x deselect · Esc back"
+            : "i install · e enable · d disable · Space toggle · x remove · u update · r reload · Esc close",
         ),
       ),
     );
@@ -172,10 +311,15 @@ export class ManagerPopup implements Component {
   handleInput(data: string): void {
     const rows = this.rows();
     if (matchesKey(data, Key.escape)) {
-      if (this.details) {
-        this.details = false;
-        this.tui.requestRender();
-      } else this.done({ action: "close" });
+      if (this.details) this.details = false;
+      else if (this.section === "Extras" && this.category) {
+        this.category = undefined;
+        this.selected = 0;
+      } else {
+        this.done({ action: "close" });
+        return;
+      }
+      this.tui.requestRender();
     } else if (
       matchesKey(data, Key.tab) ||
       matchesKey(data, Key.shift("tab"))
@@ -196,11 +340,34 @@ export class ManagerPopup implements Component {
       this.selected = Math.max(0, this.selected - 1);
       this.tui.requestRender();
     } else if (data === "/") this.done({ action: "search" });
-    else if (data === "r") this.done({ action: "refresh" });
-    else if (data === "i")
+    else if (this.section === "Extras" && data === "f") {
+      const filters: (PiResourceType | "all")[] = ["all", ...RESOURCE_TYPES];
+      this.resourceType =
+        filters[(filters.indexOf(this.resourceType) + 1) % filters.length]!;
+      this.selected = 0;
+      this.details = false;
+      this.tui.requestRender();
+    } else if (data === "r") this.done({ action: "refresh" });
+    else if (
+      this.section === "Extras" &&
+      (data === " " || data === "i" || data === "x")
+    ) {
+      const row = rows[this.selected];
+      if (row?.extra)
+        this.done({
+          action: "extra",
+          extra: row.extra,
+          enabled:
+            data === " " ? !row.state.startsWith("selected") : data === "i",
+        });
+    } else if (data === "i")
       this.done({ action: "install", source: rows[this.selected]?.source });
     else if (matchesKey(data, Key.enter)) {
-      this.details = !this.details;
+      const row = rows[this.selected];
+      if (this.section === "Extras" && row?.category && !row.extra) {
+        this.category = row.category;
+        this.selected = 0;
+      } else this.details = !this.details;
       this.tui.requestRender();
     } else {
       const entry = rows[this.selected]?.entry;

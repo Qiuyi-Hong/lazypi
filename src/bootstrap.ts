@@ -51,35 +51,54 @@ export function corePlan(items: PackageEntry[]): {
   return { missing, present };
 }
 
-export function isSetupComplete(agentDir: string): boolean {
-  const file = join(agentDir, "lazypi.json");
-  if (!existsSync(file)) return false;
+type LazyPiState = {
+  version: 1;
+  bootstrapComplete?: boolean;
+  enabledExtras?: string[];
+};
+
+export function readLazyPiState(dir: string): LazyPiState {
+  const file = join(dir, "lazypi.json");
+  if (!existsSync(file)) return { version: 1 };
   const data: unknown = JSON.parse(readFileSync(file, "utf8"));
   if (
     !data ||
     typeof data !== "object" ||
     Array.isArray(data) ||
-    (data as { version?: unknown }).version !== 1 ||
-    typeof (data as { bootstrapComplete?: unknown }).bootstrapComplete !==
-      "boolean"
+    (data as LazyPiState).version !== 1 ||
+    ("bootstrapComplete" in data &&
+      typeof data.bootstrapComplete !== "boolean") ||
+    ("enabledExtras" in data &&
+      (!Array.isArray(data.enabledExtras) ||
+        data.enabledExtras.some((id: unknown) => typeof id !== "string")))
   )
-    throw new Error(`Invalid LazyPi setup state: ${file}`);
-  return (data as { bootstrapComplete: boolean }).bootstrapComplete;
+    throw new Error(`Invalid LazyPi state: ${file}`);
+  return data as LazyPiState;
 }
 
-export function markSetupComplete(agentDir: string): void {
-  // Revalidate existing metadata before replacing it; a broken file is not an empty one.
-  isSetupComplete(agentDir);
-  mkdirSync(agentDir, { recursive: true });
-  const target = join(agentDir, "lazypi.json");
-  const temp = join(agentDir, `.lazypi-${randomUUID()}.tmp`);
+export function writeLazyPiState(
+  dir: string,
+  patch: Partial<LazyPiState>,
+): void {
+  const state = { ...readLazyPiState(dir), ...patch, version: 1 };
+  mkdirSync(dir, { recursive: true });
+  const target = join(dir, "lazypi.json");
+  const temp = join(dir, `.lazypi-${randomUUID()}.tmp`);
   try {
-    writeFileSync(temp, '{"version":1,"bootstrapComplete":true}\n');
+    writeFileSync(temp, `${JSON.stringify(state, null, 2)}\n`);
     renameSync(temp, target);
   } catch (error) {
     rmSync(temp, { force: true });
     throw error;
   }
+}
+
+export function isSetupComplete(agentDir: string): boolean {
+  return readLazyPiState(agentDir).bootstrapComplete ?? false;
+}
+
+export function markSetupComplete(agentDir: string): void {
+  writeLazyPiState(agentDir, { bootstrapComplete: true });
 }
 
 export async function installCore(
