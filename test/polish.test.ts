@@ -118,15 +118,11 @@ test("sequential native operations stop on failure and report only successful st
 
 test("settings persist atomically and reject malformed values", () => {
   const dir = mkdtempSync(join(tmpdir(), "lazypi-preferences-"));
-  writeLazyPiState(dir, {
-    autoCheckUpdates: true,
-    showCommunityPackages: false,
-  });
+  writeLazyPiState(dir, { autoCheckUpdates: true });
   markSetupComplete(dir);
   assert.deepEqual(readLazyPiState(dir), {
     version: 1,
     autoCheckUpdates: true,
-    showCommunityPackages: false,
     bootstrapComplete: true,
   });
   writeFileSync(
@@ -165,7 +161,7 @@ test("health reports malformed Pi settings, missing packages and manifests witho
 
 const theme = { fg: (_color: string, text: string) => text } as Theme;
 const tui = { requestRender: () => {}, terminal: { rows: 24 } } as TUI;
-test("Settings tab exposes switches and hides Community from navigation, Updates offers update-all", () => {
+test("Settings has only the update switch; Community remains in tab navigation", () => {
   const choices: string[] = [];
   const popup = new ManagerPopup(
     tui,
@@ -178,7 +174,7 @@ test("Settings tab exposes switches and hides Community from navigation, Updates
     undefined,
     "all",
     {},
-    { autoCheckUpdates: true, showCommunityPackages: false },
+    { autoCheckUpdates: true },
     (setting, enabled) => {
       choices.push(`${setting}:${enabled}`);
       return true;
@@ -188,15 +184,12 @@ test("Settings tab exposes switches and hides Community from navigation, Updates
     popup.render(76).join("\n"),
     /Auto-check updates at startup.*on/,
   );
+  assert.doesNotMatch(popup.render(76).join("\n"), /Show Community tab/);
+  assert.match(popup.render(76).join("\n"), /Community \(M\)/);
   popup.handleInput(" ");
-  popup.handleInput("j");
-  popup.handleInput("\r");
   popup.handleInput("\t");
   assert.equal(popup.section, "Installed");
-  assert.deepEqual(choices, [
-    "autoCheckUpdates:false",
-    "showCommunityPackages:true",
-  ]);
+  assert.deepEqual(choices, ["autoCheckUpdates:false"]);
   const updates = new ManagerPopup(
     tui,
     theme,
@@ -208,10 +201,14 @@ test("Settings tab exposes switches and hides Community from navigation, Updates
   assert.equal(choices.at(-1), "update-all");
 });
 
-test("Settings switches persist without closing and reopening the overlay", async () => {
+test("Settings switch persists without remounting; old Community preference is ignored", async () => {
   const root = mkdtempSync(join(tmpdir(), "lazypi-settings-toggle-"));
   const agent = join(root, "agent");
   markSetupComplete(agent);
+  writeFileSync(
+    join(agent, "lazypi.json"),
+    JSON.stringify({ ...readLazyPiState(agent), showCommunityPackages: false }),
+  );
   const previous = process.env.PI_CODING_AGENT_DIR;
   process.env.PI_CODING_AGENT_DIR = agent;
   try {
@@ -244,11 +241,9 @@ test("Settings switches persist without closing and reopening the overlay", asyn
             ) as ManagerPopup;
             openings++;
             if (openings > 1) return popup.handleInput("\u001b");
-            popup.handleInput(" ");
             frames.push(popup.render(76).join("\n"));
             popup.handleInput(" ");
             frames.push(popup.render(76).join("\n"));
-            popup.handleInput("j");
             popup.handleInput(" ");
             frames.push(popup.render(76).join("\n"));
             popup.handleInput("\u001b");
@@ -257,11 +252,11 @@ test("Settings switches persist without closing and reopening the overlay", asyn
       },
     } as unknown as ExtensionCommandContext);
     assert.equal(openings, 1, "a toggle must not remount the overlay");
-    assert.match(frames[0]!, /Auto-check updates at startup.*on/);
-    assert.match(frames[1]!, /Auto-check updates at startup.*off/);
-    assert.match(frames[2]!, /Show Community tab.*off/);
+    assert.match(frames[0]!, /Community \(M\)/);
+    assert.doesNotMatch(frames[0]!, /Show Community tab/);
+    assert.match(frames[1]!, /Auto-check updates at startup.*on/);
+    assert.match(frames[2]!, /Auto-check updates at startup.*off/);
     assert.equal(readLazyPiState(agent).autoCheckUpdates, false);
-    assert.equal(readLazyPiState(agent).showCommunityPackages, false);
   } finally {
     if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = previous;

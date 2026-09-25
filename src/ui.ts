@@ -46,7 +46,7 @@ const sectionShortcuts: Record<Section, string> = {
   Updates: "T",
   Settings: "S",
 };
-type Preference = "autoCheckUpdates" | "showCommunityPackages";
+type Preference = "autoCheckUpdates";
 export type Choice = {
   action:
     | "install"
@@ -96,10 +96,7 @@ export class ManagerPopup implements Component {
   private detailsByName = new Map<string, RemotePackage>();
   private extraPackages = new Map<string, string[]>();
   private disposed = false;
-  private preferences: {
-    autoCheckUpdates: boolean;
-    showCommunityPackages: boolean;
-  };
+  private preferences: { autoCheckUpdates: boolean };
   private onSettingChange: (setting: Preference, enabled: boolean) => boolean;
   constructor(
     tui: TUI,
@@ -118,7 +115,7 @@ export class ManagerPopup implements Component {
       error?: string;
       loadDetails?: (name: string) => Promise<RemotePackage>;
     } = {},
-    preferences = { autoCheckUpdates: false, showCommunityPackages: true },
+    preferences = { autoCheckUpdates: false },
     onSettingChange: (setting: Preference, enabled: boolean) => boolean = () =>
       true,
   ) {
@@ -184,13 +181,6 @@ export class ManagerPopup implements Component {
                 "Check npm asynchronously; notify only when newer versions are found.",
               state: this.preferences.autoCheckUpdates ? "on" : "off",
               source: "autoCheckUpdates",
-            },
-            {
-              name: "Show Community tab",
-              description:
-                "Hide or show uncurated npm discovery in tab navigation.",
-              state: this.preferences.showCommunityPackages ? "on" : "off",
-              source: "showCommunityPackages",
             },
           ] satisfies Row[])
         : this.section === "Extras"
@@ -311,19 +301,10 @@ export class ManagerPopup implements Component {
     const rows = this.rows();
     this.selected = Math.min(this.selected, Math.max(0, rows.length - 1));
     const current = rows[this.selected];
-    const header = sections
-      .filter(
-        (s) =>
-          this.preferences.showCommunityPackages ||
-          s !== "Community" ||
-          this.section === "Community",
-      )
-      .map((s) => {
-        const label = `${s} (${sectionShortcuts[s]})`;
-        return s === this.section
-          ? this.theme.fg("accent", `[${label}]`)
-          : label;
-      });
+    const header = sections.map((s) => {
+      const label = `${s} (${sectionShortcuts[s]})`;
+      return s === this.section ? this.theme.fg("accent", `[${label}]`) : label;
+    });
     const lines = [
       this.theme.fg("accent", line("LazyPi · native Pi packages")),
       line(header.slice(0, 4).join(" ")),
@@ -499,9 +480,7 @@ export class ManagerPopup implements Component {
       matchesKey(data, Key.shift("tab"))
     ) {
       const delta = matchesKey(data, Key.tab) ? 1 : -1;
-      const tabs: readonly Section[] = this.preferences.showCommunityPackages
-        ? sections
-        : sections.filter((section) => section !== "Community");
+      const tabs: readonly Section[] = sections;
       this.section =
         shortcut ??
         tabs[
@@ -524,10 +503,7 @@ export class ManagerPopup implements Component {
       (data === " " || matchesKey(data, Key.enter))
     ) {
       const setting = rows[this.selected]?.source;
-      if (
-        setting === "autoCheckUpdates" ||
-        setting === "showCommunityPackages"
-      ) {
+      if (setting === "autoCheckUpdates") {
         const enabled = !this.preferences[setting];
         if (this.onSettingChange(setting, enabled)) {
           this.preferences[setting] = enabled;

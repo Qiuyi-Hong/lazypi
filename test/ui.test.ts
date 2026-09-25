@@ -89,21 +89,16 @@ test("uppercase keys jump to every section without replacing existing actions", 
   ui.handleInput("U");
   assert.equal(choices.at(-1)?.action, "update-all");
 
-  const hidden = new ManagerPopup(
+  const tabs = new ManagerPopup(
     tui,
     theme,
     (choice) => choices.push(choice),
     [],
-    "Installed",
-    "",
-    [],
-    undefined,
-    "all",
-    {},
-    { autoCheckUpdates: false, showCommunityPackages: false },
+    "Extras",
   );
-  hidden.handleInput("M");
-  assert.equal(hidden.section, "Community");
+  assert.match(tabs.render(76).join("\n"), /Community \(M\)/);
+  tabs.handleInput("\t");
+  assert.equal(tabs.section, "Community");
   assert.equal(choices.at(-1)?.action, "refresh");
 });
 

@@ -210,7 +210,6 @@ export default function (pi: ExtensionAPI) {
           let preferences = {
             version: 1 as const,
             autoCheckUpdates: false,
-            showCommunityPackages: true,
           };
           try {
             preferences = { ...preferences, ...readLazyPiState(agentDir) };
@@ -362,8 +361,6 @@ export default function (pi: ExtensionAPI) {
                 },
                 {
                   autoCheckUpdates: preferences.autoCheckUpdates ?? false,
-                  showCommunityPackages:
-                    preferences.showCommunityPackages ?? true,
                 },
                 (setting, enabled) => {
                   try {
