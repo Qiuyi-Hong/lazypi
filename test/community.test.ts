@@ -4,13 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import type { TUI } from "@earendil-works/pi-tui";
+import { visibleWidth, type TUI } from "@earendil-works/pi-tui";
 import {
   CommunityRegistry,
   isCurated,
   parseDetails,
   parseSearch,
   updateFor,
+  type RemotePackage,
 } from "../src/community.ts";
 import type { PackageEntry } from "../src/packages.ts";
 import { ManagerPopup, type Choice } from "../src/ui.ts";
@@ -215,8 +216,14 @@ test("Community popup shows unverified state, fetches manifest on demand and off
       loadDetails: async () => remote,
     },
   );
-  assert.match(popup.render(76).join("\n"), /example.*disabled.*unverified/);
-  assert.doesNotMatch(popup.render(76).join("\n"), /pi-subagents.*unverified/);
+  assert.match(
+    popup.render(76).join("\n"),
+    /example[\s\S]*disabled[\s\S]*unverified/,
+  );
+  assert.doesNotMatch(
+    popup.render(76).join("\n"),
+    /pi-subagents[\s\S]*unverified/,
+  );
   popup.handleInput("\r");
   await new Promise((resolve) => setImmediate(resolve));
   assert.match(popup.render(76).join("\n"), /Author/);
@@ -255,4 +262,124 @@ test("Community popup shows unverified state, fetches manifest on demand and off
   assert.match(updates.render(76).join("\n"), /1.0.0 → 2.0.0/);
   updates.handleInput("u");
   assert.equal(choices.at(-1)?.entry?.state, "disabled");
+});
+
+test("Community list and details keep Pi state and unverified ahead of registry metadata", () => {
+  const choices: Choice[] = [];
+  const tui = { requestRender: () => {}, terminal: { rows: 24 } } as TUI;
+  const ansi = {
+    fg: (_color: string, text: string) => `\x1b[31m${text}\x1b[0m`,
+  } as Theme;
+  const latest = "9".repeat(24);
+  const registryOnly: RemotePackage = {
+    name: `\u5305${"r".repeat(70)}`,
+    source: "npm:registry-only",
+    version: latest,
+    description: `d\u001b[2J${"d".repeat(160)}`,
+    resources: ["extensions"],
+    repository: `https://example.com/${"p".repeat(60)}`,
+    author: "Registry Author",
+  };
+  const localRemote: RemotePackage = {
+    name: "example",
+    source: "npm:example",
+    version: latest,
+    description: `local-match ${"d".repeat(80)}`,
+    resources: ["skills"],
+    author: "Local Author",
+  };
+  const missing: PackageEntry = {
+    source: "npm:example@1.2.3",
+    name: "\u5305example",
+    scope: "user",
+    state: "missing",
+    resources: [],
+    version: "1.0.0",
+  };
+  const ui = new ManagerPopup(
+    tui,
+    ansi,
+    (choice) => choices.push(choice),
+    [missing],
+    "Community",
+    "",
+    [],
+    undefined,
+    "all",
+    { community: [registryOnly, localRemote] },
+  );
+  const fits = (lines: string[], width: number) => {
+    for (const line of lines) assert.ok(visibleWidth(line) <= width);
+  };
+  const row = (lines: string[]) =>
+    lines.find((line) => line.includes("\u203a"));
+
+  for (const width of [76, 32]) {
+    const lines = ui.render(width);
+    fits(lines, width);
+    const selected = row(lines);
+    assert.ok(selected);
+    assert.match(selected, /\u5305/);
+    assert.match(selected, /not installed/);
+    assert.doesNotMatch(selected, /9{6}/);
+    const text = lines.join("\n");
+    assert.match(text, /unverified/);
+    assert.doesNotMatch(text, /\u001b\[2J/);
+  }
+  ui.handleInput("i");
+  assert.equal(choices.at(-1)?.source, "npm:registry-only");
+  assert.equal(choices.at(-1)?.entry, undefined);
+  ui.handleInput("\r");
+  for (const width of [120, 32]) {
+    const lines = ui.render(width);
+    fits(lines, width);
+    const text = lines.join("\n");
+    assert.match(text, /unverified/);
+    assert.match(text, /State: not installed/);
+    assert.match(text, /Version: unknown/);
+    assert.doesNotMatch(text, /State:.*9{6}/);
+    assert.doesNotMatch(text, /Version: 9{6}/);
+    assert.doesNotMatch(text, /\u203a/);
+  }
+  ui.handleInput("\u001b");
+  ui.handleInput("j");
+  for (const width of [76, 32]) {
+    const lines = ui.render(width);
+    fits(lines, width);
+    const selected = row(lines);
+    assert.ok(selected);
+    assert.match(selected, /example/);
+    assert.match(selected, /missing/);
+    assert.match(selected, /user/);
+    assert.doesNotMatch(selected, /not installed/);
+    assert.doesNotMatch(selected, /9{6}/);
+    assert.match(lines.join("\n"), /unverified/);
+  }
+  ui.handleInput("x");
+  assert.equal(choices.at(-1)?.entry?.state, "missing");
+  ui.handleInput("\r");
+  for (const width of [120, 32]) {
+    const lines = ui.render(width);
+    fits(lines, width);
+    const text = lines.join("\n");
+    assert.match(text, /unverified/);
+    assert.match(text, /State: missing/);
+    assert.match(text, /Scope: user/);
+    assert.match(text, /Version: 1\.0\.0/);
+    assert.match(text, /Source: npm:example@1\.2\.3/);
+    assert.doesNotMatch(text, /State:.*9{6}/);
+    assert.doesNotMatch(text, /Version: 9{6}/);
+    assert.doesNotMatch(text, /\u203a/);
+  }
+  ui.handleInput("\u001b");
+  assert.match(ui.render(76).join("\n"), /\u203a/);
+  assert.doesNotMatch(ui.render(76).join("\n"), /State:/);
+  ui.handleInput("/");
+  assert.equal(choices.at(-1)?.action, "search");
+  ui.handleInput("r");
+  assert.equal(choices.at(-1)?.action, "refresh");
+  ui.handleInput("S");
+  assert.match(ui.render(76).join("\n"), /Space\/Enter toggle setting/);
+  ui.handleInput("T");
+  assert.match(ui.render(76).join("\n"), /U update all/);
 });

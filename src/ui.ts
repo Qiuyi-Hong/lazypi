@@ -265,7 +265,7 @@ export class ManagerPopup implements Component {
                   return {
                     name: pkg.name,
                     description: pkg.description || pkg.source,
-                    state: `${entry ? `${entry.state} (${entry.scope})` : "not installed"} · latest ${pkg.version} · unverified`,
+                    state: entry?.state ?? "not installed",
                     source: pkg.source,
                     entry,
                     remote: pkg,
@@ -344,15 +344,24 @@ export class ManagerPopup implements Component {
       const remote =
         current.remote &&
         (this.detailsByName.get(current.remote.name) ?? current.remote);
-      lines.push(line(plain(current.name)), line(plain(current.description)));
+      lines.push(line(plain(current.name)));
+      if (this.section === "Community") lines.push(line("unverified"));
+      lines.push(line(plain(current.description)));
       if (!current.extra)
         lines.push(
           line(plain(`Source: ${e?.source ?? current.source ?? ""}`)),
-          line(
-            plain(
-              `Scope: ${e?.scope ?? "choose at install"} · State: ${current.state}`,
-            ),
-          ),
+          ...(this.section === "Community"
+            ? [
+                line(plain(`Scope: ${e?.scope ?? "choose at install"}`)),
+                line(plain(`State: ${e?.state ?? "not installed"}`)),
+              ]
+            : [
+                line(
+                  plain(
+                    `Scope: ${e?.scope ?? "choose at install"} · State: ${current.state}`,
+                  ),
+                ),
+              ]),
           line(
             plain(
               `Version: ${e?.version ?? "unknown"} · Resources: ${e?.resources.join(", ") || "unknown"}`,
@@ -385,7 +394,11 @@ export class ManagerPopup implements Component {
       }
       if (remote)
         lines.push(
-          line(`Community · unverified · latest ${remote.version}`),
+          line(
+            this.section === "Community"
+              ? `Latest: ${plain(remote.version)}`
+              : `Community · unverified · latest ${remote.version}`,
+          ),
           line(
             `Provides: ${remote.resources.join(", ") || "unknown (manifest not loaded)"}`,
           ),
@@ -475,6 +488,17 @@ export class ManagerPopup implements Component {
           const row = `${selected ? "›" : " "} ${name}${status}`;
           if (roomy) listLines.push(row);
           else lines.push(line(row));
+        } else if (this.section === "Community") {
+          const status = `  ${item.state}${item.entry ? ` · ${item.entry.scope}` : ""}`;
+          const name = truncateToWidth(
+            plain(item.name),
+            Math.max(1, w - 4 - visibleWidth(status)),
+          );
+          lines.push(line(`${selected ? "›" : " "} ${name}${status}`));
+          const latest = item.remote?.version
+            ? ` · latest ${plain(item.remote.version)}`
+            : "";
+          lines.push(line(`  unverified${latest}  ${plain(item.description)}`));
         } else {
           lines.push(
             line(`${selected ? "›" : " "} ${item.name}  ${item.state}`),
