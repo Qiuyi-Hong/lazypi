@@ -261,6 +261,135 @@ test("Extras show Pi installation independently of selection, including incomple
   );
 });
 
+test("Extra rows keep selection and Pi state legible at wide and narrow widths", () => {
+  const fits = (lines: string[], width: number) => {
+    for (const line of lines) assert.ok(visibleWidth(line) <= width, line);
+  };
+  const items = [
+    {
+      source: "npm:pi-subagents@1",
+      scope: "user" as const,
+      state: "disabled" as const,
+      name: "Subagents",
+      path: "/installed",
+      resources: ["extensions"],
+    },
+    {
+      source: "npm:pi-web-access",
+      scope: "project" as const,
+      state: "missing" as const,
+      name: "Web Access",
+      resources: ["extensions"],
+    },
+    {
+      source: "npm:pi-web-search",
+      scope: "user" as const,
+      state: "custom" as const,
+      name: "Web Search",
+      path: "/custom",
+      resources: ["extensions"],
+    },
+  ];
+  const choices: Choice[] = [];
+  const tall = { requestRender: () => {}, terminal: { rows: 40 } } as TUI;
+  const web = getExtrasByCategory("web-research");
+  const at = (id: string) => web.findIndex((extra) => extra.id === id);
+  const ui = new ManagerPopup(
+    tall,
+    theme,
+    (choice) => choices.push(choice),
+    items,
+    "Extras",
+    "",
+    [{ id: "research-workflow", scope: "user" }],
+    "web-research",
+  );
+
+  const required = ui.render(48);
+  fits(required, 48);
+  assert.match(required.join("\n"), /pi-web-access[^\n]*required/);
+  assert.match(required.join("\n"), /pi-web-access[^\n]*not installed/);
+  assert.doesNotMatch(required.join("\n"), /Source:/);
+
+  for (let n = 0; n < at("research-workflow"); n++) ui.handleInput("j");
+  const narrow = ui.render(48);
+  fits(narrow, 48);
+  const marked = narrow.find((line) => line.includes("\u203a"));
+  assert.match(marked ?? "", /selected \(user\)/);
+  assert.match(marked ?? "", /partially installed/);
+
+  const wide = ui.render(120);
+  fits(wide, 120);
+  const wideText = wide.join("\n");
+  assert.match(wideText, /Scope: user/);
+  assert.match(wideText, /disabled \u00b7 user/);
+  assert.match(wideText, /missing \u00b7 project/);
+  assert.doesNotMatch(wideText, /enabled|active/);
+  ui.handleInput("\r");
+  const details = ui.render(120);
+  fits(details, 120);
+  const detailText = details.join("\n");
+  assert.match(detailText, /Scope: user/);
+  assert.match(detailText, /disabled \u00b7 user/);
+  assert.match(detailText, /missing \u00b7 project/);
+  assert.match(detailText, /does not uninstall/);
+  assert.doesNotMatch(detailText, /enabled|active/);
+  assert.doesNotMatch(detailText, /\u203a/);
+  ui.handleInput("\u001b");
+  ui.handleInput("x");
+  assert.deepEqual(choices.at(-1)?.action, "extra");
+  assert.equal(choices.at(-1)?.enabled, false);
+  assert.equal(choices.at(-1)?.extra?.id, "research-workflow");
+
+  const direct = new ManagerPopup(
+    tall,
+    theme,
+    (choice) => choices.push(choice),
+    items,
+    "Extras",
+    "",
+    [
+      { id: "research-workflow", scope: "user" },
+      { id: "pi-web-access", scope: "project" },
+    ],
+    "web-research",
+  );
+  for (let n = 0; n < at("pi-web-access"); n++) direct.handleInput("j");
+  const access = direct.render(48).find((line) => line.includes("\u203a"));
+  assert.match(access ?? "", /selected \(project\)/);
+  assert.match(access ?? "", /not installed/);
+  assert.doesNotMatch(access ?? "", /required/);
+  direct.handleInput(" ");
+  assert.equal(choices.at(-1)?.action, "extra");
+  assert.equal(choices.at(-1)?.enabled, false);
+  direct.handleInput("i");
+  assert.equal(choices.at(-1)?.action, "extra");
+  assert.equal(choices.at(-1)?.enabled, true);
+
+  const search = new ManagerPopup(
+    tall,
+    theme,
+    () => {},
+    items,
+    "Extras",
+    "",
+    [{ id: "pi-web-search", scope: "user" }],
+    "web-research",
+  );
+  for (let n = 0; n < at("pi-web-search"); n++) search.handleInput("j");
+  const customWide = search.render(120);
+  fits(customWide, 120);
+  assert.match(customWide.join("\n"), /custom \u00b7 user/);
+  assert.doesNotMatch(customWide.join("\n"), /enabled|active/);
+  search.handleInput("\r");
+  assert.match(search.render(48).join("\n"), /custom \u00b7 user/);
+  search.handleInput("\u001b");
+  search.handleInput("f");
+  assert.equal(search.resourceType, "extension");
+  assert.match(search.render(120).join("\n"), /x deselect/);
+  assert.doesNotMatch(search.render(48).join("\n"), /uninstall|\bremove\b/);
+});
+
 test("Extras categories, type filters and tag search remain independent", () => {
   const choices: Choice[] = [];
   const ui = new ManagerPopup(

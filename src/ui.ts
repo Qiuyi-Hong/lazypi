@@ -78,6 +78,29 @@ type Row = {
 
 const plain = (value: string) => value.replace(/[\x00-\x1f\x7f-\x9f]/g, " ");
 
+function extraRow(
+  name: string,
+  state: string,
+  marker: string,
+  width: number,
+): { lines: string[]; yieldRest: boolean } {
+  const prefix = `${marker} `;
+  const status = `  ${state}`;
+  const room = width - visibleWidth(prefix) - visibleWidth(status);
+  if (room >= 1)
+    return {
+      lines: [`${prefix}${truncateToWidth(plain(name), room)}${status}`],
+      yieldRest: false,
+    };
+  return {
+    lines: [
+      truncateToWidth(`${prefix}${plain(name)}`, width),
+      truncateToWidth(state, width),
+    ],
+    yieldRest: true,
+  };
+}
+
 function preview(row: Row): string[] {
   const entry = row.entry;
   const lines = [
@@ -181,6 +204,26 @@ export class ManagerPopup implements Component {
       this.extraPackages.set(extra.id, sources);
     }
     return sources;
+  }
+
+  private extraFacts(extra: Extra): string[] {
+    const direct = this.selections.filter((item) => item.id === extra.id);
+    const sources = this.sourcesFor(extra);
+    return [
+      `Scope: ${direct.map((item) => item.scope).join(", ") || "not selected"}`,
+      ...(sources.length
+        ? sources.flatMap((source) => {
+            const matches = this.items.filter(
+              (item) => identity(item.source) === identity(source),
+            );
+            return matches.length
+              ? matches.map(
+                  (item) => `${item.state} · ${item.scope} · ${plain(source)}`,
+                )
+              : [`not installed · ${plain(source)}`];
+          })
+        : ["Packages: none"]),
+    ];
   }
 
   private rows(): Row[] {
@@ -373,7 +416,7 @@ export class ManagerPopup implements Component {
           line(`Resources: ${extra.resourceTypes.join(", ") || "workflow"}`),
           line(`Tags: ${extra.tags.join(", ")}`),
           line(`Requires: ${extra.requires?.join(", ") || "none"}`),
-          line(`Packages: ${this.sourcesFor(extra).join(", ") || "none"}`),
+          ...this.extraFacts(extra).map((fact) => line(fact)),
           line("Disabling a selection does not uninstall packages."),
         );
       } else if (e || current.source) {
@@ -429,7 +472,7 @@ export class ManagerPopup implements Component {
       const paneMin = 22;
       // ponytail: fit gate, not a tuned breakpoint. Raise if state and source no longer both fit.
       const roomy =
-        this.section === "Packages" &&
+        (this.section === "Packages" || !!current?.extra) &&
         w >= 4 &&
         inner >= listMin + gutter.length + paneMin &&
         visible >= 6;
@@ -475,17 +518,40 @@ export class ManagerPopup implements Component {
           const row = `${selected ? "›" : " "} ${name}${status}`;
           if (roomy) listLines.push(row);
           else lines.push(line(row));
+        } else if (item.extra) {
+          const fitted = extraRow(
+            item.name,
+            item.state,
+            selected ? "›" : " ",
+            roomy ? listWidth : Math.max(0, w - 2),
+          );
+          if (roomy) listLines.push(...fitted.lines);
+          else {
+            for (const text of fitted.lines) lines.push(line(text));
+            if (!fitted.yieldRest) {
+              lines.push(this.theme.fg("muted", line(`  ${item.description}`)));
+              if (item.metadata)
+                lines.push(this.theme.fg("muted", line(`  ${item.metadata}`)));
+            }
+          }
         } else {
           lines.push(
             line(`${selected ? "›" : " "} ${item.name}  ${item.state}`),
           );
           lines.push(this.theme.fg("muted", line(`  ${item.description}`)));
+          if (item.metadata)
+            lines.push(this.theme.fg("muted", line(`  ${item.metadata}`)));
         }
-        if (item.metadata)
-          lines.push(this.theme.fg("muted", line(`  ${item.metadata}`)));
       }
       if (roomy && current) {
-        const side = preview(current);
+        const side = current.extra
+          ? [
+              plain(current.name),
+              current.state,
+              ...this.extraFacts(current.extra),
+              "Disabling a selection does not uninstall packages.",
+            ]
+          : preview(current);
         const count = Math.min(
           visible,
           Math.max(listLines.length, side.length),
