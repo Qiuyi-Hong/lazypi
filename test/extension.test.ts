@@ -253,7 +253,10 @@ test("/lazypi community renders before npm responds and confirms an unverified n
                 ),
               );
               await new Promise((resolve) => setImmediate(resolve));
-              assert.match(popup.render(76).join("\n"), /example.*unverified/);
+              assert.match(
+                popup.render(76).join("\n"),
+                /example[\s\S]*unverified/,
+              );
               popup.handleInput("i");
             })();
           }),
