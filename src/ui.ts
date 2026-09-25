@@ -76,6 +76,26 @@ type Row = {
   remote?: RemotePackage;
 };
 
+const plain = (value: string) => value.replace(/[\x00-\x1f\x7f-\x9f]/g, " ");
+
+function preview(row: Row): string[] {
+  const entry = row.entry;
+  const lines = [
+    plain(row.name),
+    `Source: ${plain(entry?.source ?? row.source ?? "")}`,
+    `Scope: ${plain(entry?.scope ?? "")}`,
+    `State: ${plain(row.state)}`,
+  ];
+  if (entry?.version) lines.push(`Version: ${plain(entry.version)}`);
+  if (entry?.resources.length)
+    lines.push(`Resources: ${plain(entry.resources.join(", "))}`);
+  if (entry?.description) lines.push(plain(entry.description));
+  if (entry?.repository) lines.push(`Repository: ${plain(entry.repository)}`);
+  if (entry?.author) lines.push(`Author: ${plain(entry.author)}`);
+  if (entry?.error) lines.push(plain(entry.error));
+  return lines;
+}
+
 export class ManagerPopup implements Component {
   private selected = 0;
   private details = false;
@@ -296,7 +316,7 @@ export class ManagerPopup implements Component {
   }
 
   render(width: number): string[] {
-    const w = Math.max(1, Math.min(width, 76));
+    const w = Math.max(1, width);
     const line = (text: string) => truncateToWidth(text, w);
     const rows = this.rows();
     this.selected = Math.min(this.selected, Math.max(0, rows.length - 1));
@@ -324,18 +344,24 @@ export class ManagerPopup implements Component {
       const remote =
         current.remote &&
         (this.detailsByName.get(current.remote.name) ?? current.remote);
-      lines.push(line(current.name), line(current.description));
+      lines.push(line(plain(current.name)), line(plain(current.description)));
       if (!current.extra)
         lines.push(
-          line(`Source: ${e?.source ?? current.source}`),
+          line(plain(`Source: ${e?.source ?? current.source ?? ""}`)),
           line(
-            `Scope: ${e?.scope ?? "choose at install"} · State: ${current.state}`,
+            plain(
+              `Scope: ${e?.scope ?? "choose at install"} · State: ${current.state}`,
+            ),
           ),
           line(
-            `Version: ${e?.version ?? "unknown"} · Resources: ${e?.resources.join(", ") || "unknown"}`,
+            plain(
+              `Version: ${e?.version ?? "unknown"} · Resources: ${e?.resources.join(", ") || "unknown"}`,
+            ),
           ),
           line(
-            `Repository: ${e?.repository ?? "unknown"} · Author: ${e?.author ?? "unknown"}`,
+            plain(
+              `Repository: ${e?.repository ?? "unknown"} · Author: ${e?.author ?? "unknown"}`,
+            ),
           ),
         );
       if (current.extra) {
@@ -369,7 +395,7 @@ export class ManagerPopup implements Component {
           line(`Published: ${remote.published || "unknown"}`),
           line(`Dependencies: ${remote.dependencies?.join(", ") || "unknown"}`),
         );
-      if (e?.error) lines.push(line(e.error));
+      if (e?.error) lines.push(line(plain(e.error)));
     } else if (!rows.length)
       lines.push(
         line(
@@ -379,23 +405,41 @@ export class ManagerPopup implements Component {
         ),
       );
     else {
-      const visible =
+      const packageRows =
         this.section === "Packages" ||
         this.section === "Enabled" ||
-        this.section === "Disabled"
-          ? Math.max(1, Math.min(12, Math.min(this.tui.terminal.rows, 26) - 12))
-          : Math.max(
-              1,
-              Math.min(
-                7,
-                Math.floor(
-                  (this.tui.terminal.rows - 12) /
-                    (this.section === "Extras" && (this.category || this.query)
-                      ? 4
-                      : 2),
-                ),
+        this.section === "Disabled";
+      const visible = packageRows
+        ? Math.max(1, Math.min(12, Math.min(this.tui.terminal.rows, 26) - 12))
+        : Math.max(
+            1,
+            Math.min(
+              7,
+              Math.floor(
+                (this.tui.terminal.rows - 12) /
+                  (this.section === "Extras" && (this.category || this.query)
+                    ? 4
+                    : 2),
               ),
-            );
+            ),
+          );
+      const inner = Math.max(0, w - 2);
+      const gutter = " │ ";
+      const listMin = 26;
+      const paneMin = 22;
+      // ponytail: fit gate, not a tuned breakpoint. Raise if state and source no longer both fit.
+      const roomy =
+        this.section === "Packages" &&
+        w >= 4 &&
+        inner >= listMin + gutter.length + paneMin &&
+        visible >= 6;
+      const pane = roomy
+        ? Math.max(
+            paneMin,
+            Math.min(40, Math.floor((inner - gutter.length) * 0.42)),
+          )
+        : 0;
+      const listWidth = roomy ? inner - gutter.length - pane : 0;
       const start = Math.max(
         0,
         Math.min(
@@ -403,6 +447,7 @@ export class ManagerPopup implements Component {
           rows.length - visible,
         ),
       );
+      const listLines: string[] = [];
       for (const [offset, item] of rows
         .slice(start, start + visible)
         .entries()) {
@@ -418,17 +463,18 @@ export class ManagerPopup implements Component {
           lines.push(
             this.theme.fg("accent", line(EXTRA_CATEGORIES[item.category])),
           );
-        if (
-          this.section === "Packages" ||
-          this.section === "Enabled" ||
-          this.section === "Disabled"
-        ) {
+        if (packageRows) {
           const status = `  ${item.state} · ${item.entry!.scope}`;
           const name = truncateToWidth(
-            item.name,
-            Math.max(1, w - 4 - visibleWidth(status)),
+            plain(item.name),
+            Math.max(
+              1,
+              (roomy ? listWidth : w) - (roomy ? 2 : 4) - visibleWidth(status),
+            ),
           );
-          lines.push(line(`${selected ? "›" : " "} ${name}${status}`));
+          const row = `${selected ? "›" : " "} ${name}${status}`;
+          if (roomy) listLines.push(row);
+          else lines.push(line(row));
         } else {
           lines.push(
             line(`${selected ? "›" : " "} ${item.name}  ${item.state}`),
@@ -437,6 +483,19 @@ export class ManagerPopup implements Component {
         }
         if (item.metadata)
           lines.push(this.theme.fg("muted", line(`  ${item.metadata}`)));
+      }
+      if (roomy && current) {
+        const side = preview(current);
+        const count = Math.min(
+          visible,
+          Math.max(listLines.length, side.length),
+        );
+        for (let i = 0; i < count; i++)
+          lines.push(
+            truncateToWidth(listLines[i] ?? "", listWidth, "", true) +
+              gutter +
+              truncateToWidth(side[i] ?? "", pane, "", true),
+          );
       }
       if (rows.length > visible)
         lines.push(line(`${this.selected + 1}/${rows.length}`));
