@@ -23,7 +23,7 @@ test("popup renders within narrow terminal widths and supports section navigatio
         resources: ["skills"],
       },
     ],
-    "Installed",
+    "Packages",
   );
   for (const line of ui.render(32)) assert.ok(visibleWidth(line) <= 32);
   ui.handleInput("\t");
@@ -53,11 +53,11 @@ test("uppercase keys jump to every section without replacing existing actions", 
     theme,
     (choice) => choices.push(choice),
     [],
-    "Installed",
+    "Packages",
   );
   const header = ui.render(76).slice(2, 4).join("\n");
   for (const [name, key] of [
-    ["Installed", "I"],
+    ["Packages", "P"],
     ["Enabled", "E"],
     ["Disabled", "D"],
     ["Core", "C"],
@@ -76,11 +76,13 @@ test("uppercase keys jump to every section without replacing existing actions", 
     ["M", "Community"],
     ["T", "Updates"],
     ["S", "Settings"],
-    ["I", "Installed"],
+    ["P", "Packages"],
   ] as const) {
     ui.handleInput(key);
     assert.equal(ui.section, section);
   }
+  ui.handleInput("I"); // Legacy section shortcut.
+  assert.equal(ui.section, "Packages");
   assert.deepEqual(
     choices.map((choice) => choice.action),
     ["refresh", "refresh"],
@@ -100,6 +102,105 @@ test("uppercase keys jump to every section without replacing existing actions", 
   tabs.handleInput("\t");
   assert.equal(tabs.section, "Community");
   assert.equal(choices.at(-1)?.action, "refresh");
+});
+
+test("Packages keeps Pi scope and state visible across long inventories and emits selected actions", () => {
+  const choices: Choice[] = [];
+  const entries = [
+    {
+      source: "npm:pi-subagents",
+      name: "pi-subagents",
+      scope: "user" as const,
+      state: "shadowed" as const,
+      resources: [],
+    },
+    {
+      source: "npm:pi-subagents",
+      name: "pi-subagents",
+      scope: "project" as const,
+      state: "custom" as const,
+      resources: [],
+    },
+    {
+      source: "./missing",
+      name: "missing",
+      scope: "project" as const,
+      state: "missing" as const,
+      resources: [],
+    },
+    ...Array.from({ length: 15 }, (_, n) => ({
+      source: `npm:ordinary-${n}`,
+      name: `ordinary-${n}`,
+      scope: "user" as const,
+      state: "enabled" as const,
+      description: "Should only appear in details",
+      resources: [],
+    })),
+    {
+      source: "npm:last",
+      name: "last",
+      scope: "project" as const,
+      state: "disabled" as const,
+      resources: [],
+    },
+  ];
+  const ui = new ManagerPopup(
+    tui,
+    theme,
+    (choice) => choices.push(choice),
+    entries,
+    "Packages",
+  );
+  let frame = ui.render(76).join("\n");
+  assert.match(frame, /pi-subagents\s+shadowed · user/);
+  assert.match(frame, /pi-subagents\s+custom · project/);
+  assert.match(frame, /missing\s+missing · project/);
+  assert.doesNotMatch(
+    frame,
+    /Should only appear in details|pi-mcp-adapter.*not installed/,
+  );
+  ui.handleInput("x");
+  assert.deepEqual(choices.at(-1), { action: "remove", entry: entries[0] });
+  ui.handleInput("j");
+  ui.handleInput("u");
+  assert.deepEqual(choices.at(-1), { action: "update", entry: entries[1] });
+  ui.handleInput("j");
+  ui.handleInput("i");
+  assert.deepEqual(choices.at(-1), {
+    action: "install",
+    entry: entries[2],
+    source: undefined,
+  });
+  for (let n = 2; n < entries.length - 1; n++) ui.handleInput("j");
+  frame = ui.render(76).join("\n");
+  assert.match(frame, /› last\s+disabled · project/);
+  assert.match(frame, new RegExp(`${entries.length}/${entries.length}`));
+  assert.ok(ui.render(76).length <= 26);
+  assert.match(ui.render(32).join("\n"), /› last\s+disabled · project/);
+  ui.handleInput(" ");
+  assert.deepEqual(choices.at(-1), { action: "enable", entry: entries.at(-1) });
+  ui.handleInput("\r");
+  assert.match(ui.render(76).join("\n"), /Scope: project · State: disabled/);
+  ui.handleInput("D");
+  assert.equal(ui.section, "Disabled");
+  assert.match(ui.render(76).join("\n"), /last\s+disabled · project/);
+  ui.handleInput("E");
+  assert.equal(ui.section, "Enabled");
+  assert.doesNotMatch(
+    ui.render(76).join("\n"),
+    /shadowed · user|custom · project|missing · project/,
+  );
+
+  const short = new ManagerPopup(
+    { requestRender: () => {}, terminal: { rows: 16 } } as TUI,
+    theme,
+    () => {},
+    entries,
+    "Packages",
+  );
+  for (let n = 0; n < entries.length - 1; n++) short.handleInput("j");
+  assert.ok(short.render(76).length <= 16);
+  assert.match(short.render(76).join("\n"), /› last\s+disabled · project/);
 });
 
 test("Extras show Pi installation independently of selection, including incomplete workflows", () => {

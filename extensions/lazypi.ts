@@ -172,11 +172,12 @@ export default function (pi: ExtensionAPI) {
                     ? "Updates"
                     : requested === "settings"
                       ? "Settings"
-                      : "Installed";
+                      : "Packages";
       if (
         requested &&
         ![
           "installed",
+          "packages",
           "enabled",
           "disabled",
           "core",

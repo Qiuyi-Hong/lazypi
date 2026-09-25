@@ -26,7 +26,7 @@ import {
 import { identity, type PackageEntry } from "./packages.ts";
 
 export const sections = [
-  "Installed",
+  "Packages",
   "Enabled",
   "Disabled",
   "Core",
@@ -37,7 +37,7 @@ export const sections = [
 ] as const;
 export type Section = (typeof sections)[number];
 const sectionShortcuts: Record<Section, string> = {
-  Installed: "I",
+  Packages: "P",
   Enabled: "E",
   Disabled: "D",
   Core: "C",
@@ -280,13 +280,13 @@ export class ManagerPopup implements Component {
                 : this.items
                     .filter(
                       (item) =>
-                        this.section === "Installed" ||
+                        this.section === "Packages" ||
                         item.state === this.section.toLowerCase(),
                     )
                     .map((entry) => ({
                       name: entry.name,
                       description: `${entry.source} · ${entry.scope}`,
-                      state: `${entry.state}${updateFor(entry, this.versions.get(identity(entry.source))) ? ` · ${entry.version} → ${this.versions.get(identity(entry.source))!.version}` : ""}`,
+                      state: entry.state,
                       entry,
                       remote: this.versions.get(identity(entry.source)),
                     }));
@@ -379,18 +379,23 @@ export class ManagerPopup implements Component {
         ),
       );
     else {
-      const visible = Math.max(
-        1,
-        Math.min(
-          7,
-          Math.floor(
-            (this.tui.terminal.rows - 12) /
-              (this.section === "Extras" && (this.category || this.query)
-                ? 4
-                : 2),
-          ),
-        ),
-      );
+      const visible =
+        this.section === "Packages" ||
+        this.section === "Enabled" ||
+        this.section === "Disabled"
+          ? Math.max(1, Math.min(12, Math.min(this.tui.terminal.rows, 26) - 12))
+          : Math.max(
+              1,
+              Math.min(
+                7,
+                Math.floor(
+                  (this.tui.terminal.rows - 12) /
+                    (this.section === "Extras" && (this.category || this.query)
+                      ? 4
+                      : 2),
+                ),
+              ),
+            );
       const start = Math.max(
         0,
         Math.min(
@@ -413,8 +418,23 @@ export class ManagerPopup implements Component {
           lines.push(
             this.theme.fg("accent", line(EXTRA_CATEGORIES[item.category])),
           );
-        lines.push(line(`${selected ? "›" : " "} ${item.name}  ${item.state}`));
-        lines.push(this.theme.fg("muted", line(`  ${item.description}`)));
+        if (
+          this.section === "Packages" ||
+          this.section === "Enabled" ||
+          this.section === "Disabled"
+        ) {
+          const status = `  ${item.state} · ${item.entry!.scope}`;
+          const name = truncateToWidth(
+            item.name,
+            Math.max(1, w - 4 - visibleWidth(status)),
+          );
+          lines.push(line(`${selected ? "›" : " "} ${name}${status}`));
+        } else {
+          lines.push(
+            line(`${selected ? "›" : " "} ${item.name}  ${item.state}`),
+          );
+          lines.push(this.theme.fg("muted", line(`  ${item.description}`)));
+        }
         if (item.metadata)
           lines.push(this.theme.fg("muted", line(`  ${item.metadata}`)));
       }
@@ -461,9 +481,10 @@ export class ManagerPopup implements Component {
 
   handleInput(data: string): void {
     const rows = this.rows();
-    const shortcut = sections.find(
-      (section) => sectionShortcuts[section] === data,
-    );
+    const shortcut =
+      data === "I"
+        ? "Packages"
+        : sections.find((section) => sectionShortcuts[section] === data);
     if (matchesKey(data, Key.escape)) {
       if (this.details) this.details = false;
       else if (this.section === "Extras" && this.category) {
