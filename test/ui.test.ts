@@ -305,3 +305,120 @@ test("Extras categories, type filters and tag search remain independent", () => 
     search.render(76).some((line) => line.includes("@dietrichgebert/ponytail")),
   );
 });
+
+test("Packages inspector follows selection only when the frame can hold it", () => {
+  const choices: Choice[] = [];
+  const noisy = "\u001b[2J";
+  const entries = [
+    {
+      source: `npm:pi-subagents${noisy}`,
+      name: `\u5305${noisy}tools`,
+      scope: "user" as const,
+      state: "enabled" as const,
+      description: "x".repeat(180),
+      version: "1.2.3",
+      repository: "https://example.com/pkg",
+      author: "Ada",
+      resources: ["skills"],
+    },
+    {
+      source: "npm:second",
+      name: "second",
+      scope: "project" as const,
+      state: "missing" as const,
+      resources: [],
+    },
+  ];
+  const ansi = {
+    fg: (_color: string, text: string) => `\x1b[31m${text}\x1b[0m`,
+  } as Theme;
+  const tall = { requestRender: () => {}, terminal: { rows: 24 } } as TUI;
+  const ui = new ManagerPopup(
+    tall,
+    ansi,
+    (choice) => choices.push(choice),
+    entries,
+    "Packages",
+  );
+  const fits = (lines: string[], width: number) => {
+    for (const line of lines) assert.ok(visibleWidth(line) <= width);
+  };
+
+  const wide = ui.render(120);
+  fits(wide, 120);
+  const wideText = wide.join("\n");
+  assert.match(wideText, /\u203a \u5305/);
+  assert.match(wideText, /Source: npm:pi-subagents/);
+  assert.match(wideText, /Scope: user/);
+  assert.match(wideText, /State: enabled/);
+  assert.match(wideText, /Version: 1\.2\.3/);
+  assert.match(wideText, /Repository: https:\/\/example.com\/pkg/);
+  assert.match(wideText, /Search:/);
+  assert.match(wideText, /Enter details/);
+  assert.doesNotMatch(wideText, /\u001b\[2J/);
+  ui.handleInput("\r");
+  const details = ui.render(120);
+  fits(details, 120);
+  assert.match(details.join("\n"), /Repository: https:\/\/example.com\/pkg/);
+  assert.match(details.join("\n"), /Author: Ada/);
+  assert.doesNotMatch(details.join("\n"), /\u203a/);
+  ui.handleInput("\u001b");
+  assert.match(ui.render(120).join("\n"), /\u203a/);
+  assert.match(ui.render(120).join("\n"), /Source: npm:pi-subagents/);
+  ui.handleInput("j");
+  assert.match(ui.render(120).join("\n"), /Source: npm:second/);
+  assert.match(ui.render(120).join("\n"), /Scope: project/);
+  assert.match(ui.render(120).join("\n"), /State: missing/);
+  ui.handleInput("x");
+  assert.deepEqual(choices.at(-1), { action: "remove", entry: entries[1] });
+  ui.handleInput("/");
+  assert.equal(choices.at(-1)?.action, "search");
+  ui.handleInput("\r");
+  const selectedDetails = ui.render(120).join("\n");
+  assert.match(selectedDetails, /Source: npm:second/);
+  assert.doesNotMatch(selectedDetails, /\u203a/);
+  ui.handleInput("\u001b");
+  assert.match(ui.render(120).join("\n"), /Source: npm:second/);
+
+  const narrow = new ManagerPopup(tall, ansi, () => {}, entries, "Packages");
+  const narrowLines = narrow.render(32);
+  fits(narrowLines, 32);
+  assert.match(narrowLines.join("\n"), /\u203a \u5305/);
+  assert.match(narrowLines.join("\n"), /enabled · user/);
+  assert.doesNotMatch(narrowLines.join("\n"), /Source:/);
+  narrow.handleInput("\r");
+  const narrowDetails = narrow.render(32);
+  fits(narrowDetails, 32);
+  assert.match(narrowDetails.join("\n"), /Source:/);
+  assert.doesNotMatch(narrowDetails.join("\n"), /\u203a/);
+  narrow.handleInput("\u001b");
+  assert.doesNotMatch(narrow.render(32).join("\n"), /Source:/);
+
+  const short = new ManagerPopup(
+    { requestRender: () => {}, terminal: { rows: 16 } } as TUI,
+    ansi,
+    () => {},
+    entries,
+    "Packages",
+  );
+  const shortLines = short.render(120);
+  fits(shortLines, 120);
+  assert.ok(shortLines.length <= 16);
+  assert.match(shortLines.join("\n"), /\u203a \u5305/);
+  assert.doesNotMatch(shortLines.join("\n"), /Source:/);
+  short.handleInput("\r");
+  assert.match(short.render(120).join("\n"), /Repository:/);
+  short.handleInput("\u001b");
+  assert.doesNotMatch(short.render(120).join("\n"), /Source:/);
+
+  ui.handleInput("S");
+  assert.match(ui.render(120).join("\n"), /Space\/Enter toggle setting/);
+  assert.doesNotMatch(ui.render(120).join("\n"), /Source:/);
+  ui.handleInput("T");
+  assert.match(ui.render(120).join("\n"), /U update all/);
+  const extras = new ManagerPopup(tall, ansi, () => {}, entries, "Extras");
+  assert.match(extras.render(120).join("\n"), /AI & Agents/);
+  assert.doesNotMatch(extras.render(120).join("\n"), /Source:/);
+  extras.handleInput("f");
+  assert.equal(extras.resourceType, "extension");
+});
