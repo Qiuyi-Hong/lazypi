@@ -8,8 +8,17 @@ import {
   installCore,
   isSetupComplete,
   markSetupComplete,
+  readLazyPiState,
+  writeLazyPiState,
 } from "../src/bootstrap.ts";
 import { core } from "../src/catalog.ts";
+import { CommunityRegistry, type RemotePackage } from "../src/community.ts";
+import {
+  health,
+  runSequential,
+  syncPlan,
+  updateAllPlan,
+} from "../src/polish.ts";
 import {
   planExtra,
   readSelections,
@@ -34,6 +43,43 @@ import {
 import type { ExtraCategory, PiResourceType } from "../src/extras.ts";
 
 export default function (pi: ExtensionAPI) {
+  pi.on("session_start", (_event, ctx) => {
+    if (ctx.mode !== "tui") return;
+    try {
+      const agentDir = getAgentDir();
+      const config = readLazyPiState(agentDir);
+      if (!config.autoCheckUpdates) return;
+      const { settings, manager } = createNative(
+        ctx.cwd,
+        ctx.isProjectTrusted(),
+      );
+      const items = inventory(settings, manager);
+      const registry = new CommunityRegistry(agentDir);
+      void registry
+        .checkUpdates(items)
+        .then((failed) => {
+          if (failed) return; // A partial registry result is not a trustworthy notification.
+          const versions = new Map<string, RemotePackage>();
+          for (const item of items) {
+            const latest = registry.cachedDetails(
+              identity(item.source).slice(4),
+            );
+            if (latest) versions.set(identity(item.source), latest);
+          }
+          const count = updateAllPlan(items, versions).length;
+          if (count)
+            ctx.ui.notify(
+              `${count} Pi package update${count === 1 ? "" : "s"} available. /lazypi updates`,
+              "info",
+            );
+        })
+        .catch(() => {
+          /* Startup is never blocked by registry failures. */
+        });
+    } catch {
+      /* A broken optional setting must not prevent Pi from starting. */
+    }
+  });
   pi.registerCommand("lazypi", {
     description: "Manage native Pi packages in a terminal popup",
     handler: async (args, ctx) => {
@@ -42,6 +88,75 @@ export default function (pi: ExtensionAPI) {
         return;
       }
       const requested = args.trim().toLowerCase();
+      const agentDir = getAgentDir();
+      if (requested === "health") {
+        const issues = health(ctx.cwd, agentDir, ctx.isProjectTrusted());
+        ctx.ui.notify(
+          issues.length
+            ? `LazyPi health:\n${issues.join("\n")}`
+            : "LazyPi health: no issues found.",
+          issues.length ? "warning" : "info",
+        );
+        return;
+      }
+      if (requested === "sync") {
+        try {
+          const { settings, manager } = createNative(
+            ctx.cwd,
+            ctx.isProjectTrusted(),
+          );
+          const selections = readSelections(
+            agentDir,
+            ctx.cwd,
+            ctx.isProjectTrusted(),
+          );
+          const proposed = syncPlan(inventory(settings, manager), selections);
+          const summary = [
+            ...proposed.repairs.map(
+              ({ action, entry }) =>
+                `${action === "install" ? "+" : "↑"} ${entry.source} (${entry.scope}; ${action})`,
+            ),
+            ...proposed.unchanged.map((source) => `✓ ${source}`),
+            ...proposed.warnings.map((warning) => `! ${warning}`),
+            "No package will be removed. Continue?",
+          ];
+          if (!proposed.repairs.length) {
+            ctx.ui.notify(
+              `LazyPi sync: nothing to change.${proposed.warnings.length ? ` ${proposed.warnings.join(" ")}` : ""}`,
+              "info",
+            );
+            return;
+          }
+          if (!(await ctx.ui.confirm("LazyPi sync plan", summary.join("\n"))))
+            return;
+          const live = createNative(ctx.cwd, ctx.isProjectTrusted());
+          if (
+            JSON.stringify(
+              syncPlan(
+                inventory(live.settings, live.manager),
+                readSelections(agentDir, ctx.cwd, ctx.isProjectTrusted()),
+              ).repairs,
+            ) !== JSON.stringify(proposed.repairs)
+          )
+            throw new Error("Inventory changed; run /lazypi sync again.");
+          const { applied, failed } = await runSequential(
+            proposed.repairs,
+            ({ action, entry }) =>
+              execute(action, entry, live.settings, live.manager),
+          );
+          const failure =
+            failed &&
+            `${failed.step.action} ${failed.step.entry.source}: ${String(failed.error)}`;
+          ctx.ui.notify(
+            `LazyPi sync: ${applied.length} applied${failure ? `; stopped at ${failure}. Kept successful changes; retry /lazypi sync.` : "."}`,
+            failure ? "error" : "info",
+          );
+          if (applied.length || failure) await ctx.reload();
+        } catch (error) {
+          ctx.ui.notify(`LazyPi sync: ${String(error)}`, "error");
+        }
+        return;
+      }
       const section: Section =
         requested === "enabled"
           ? "Enabled"
@@ -51,7 +166,13 @@ export default function (pi: ExtensionAPI) {
               ? "Core"
               : requested === "extras"
                 ? "Extras"
-                : "Installed";
+                : requested === "community"
+                  ? "Community"
+                  : requested === "updates"
+                    ? "Updates"
+                    : requested === "settings"
+                      ? "Settings"
+                      : "Installed";
       if (
         requested &&
         ![
@@ -61,6 +182,9 @@ export default function (pi: ExtensionAPI) {
           "core",
           "catalog",
           "extras",
+          "community",
+          "updates",
+          "settings",
         ].includes(requested)
       ) {
         ctx.ui.notify(
@@ -74,6 +198,8 @@ export default function (pi: ExtensionAPI) {
       let category: ExtraCategory | undefined;
       let resourceType: PiResourceType | "all" = "all";
       let deferredSetup = false;
+      let forceRefresh = false;
+      const registry = new CommunityRegistry(agentDir);
       for (;;) {
         try {
           const { settings, manager } = createNative(
@@ -81,7 +207,19 @@ export default function (pi: ExtensionAPI) {
             ctx.isProjectTrusted(),
           );
           const items = inventory(settings, manager);
-          const agentDir = getAgentDir();
+          let preferences = {
+            version: 1 as const,
+            autoCheckUpdates: false,
+            showCommunityPackages: true,
+          };
+          try {
+            preferences = { ...preferences, ...readLazyPiState(agentDir) };
+          } catch (error) {
+            ctx.ui.notify(
+              `LazyPi preferences need repair: ${String(error)}. Run /lazypi health.`,
+              "warning",
+            );
+          }
           const selections = readSelections(
             agentDir,
             ctx.cwd,
@@ -99,7 +237,7 @@ export default function (pi: ExtensionAPI) {
               deferredSetup = true; // An optional setup marker must not hide the existing Pi inventory.
             }
           }
-          if (setupPending) {
+          if (setupPending && active !== "Settings") {
             const { missing, present } = corePlan(items);
             if (!missing.length) {
               try {
@@ -186,6 +324,20 @@ export default function (pi: ExtensionAPI) {
             }
           }
           let popup!: ManagerPopup;
+          const remoteSection = active === "Community" || active === "Updates";
+          const remoteTab = active;
+          const offline = /^(1|true|yes)$/i.test(process.env.PI_OFFLINE ?? "");
+          let open = true;
+          const community = registry.cachedSearch(query);
+          const versions = new Map<string, RemotePackage>();
+          for (const item of items) {
+            if (item.source.startsWith("npm:")) {
+              const cached = registry.cachedDetails(
+                identity(item.source).slice(4),
+              );
+              if (cached) versions.set(identity(item.source), cached);
+            }
+          }
           const choice = await ctx.ui.custom<Choice>(
             (tui, theme, _keys, done) => {
               popup = new ManagerPopup(
@@ -198,7 +350,88 @@ export default function (pi: ExtensionAPI) {
                 selections,
                 category,
                 resourceType,
+                {
+                  community,
+                  versions,
+                  loading: remoteSection && !offline,
+                  error:
+                    remoteSection && offline
+                      ? "Offline: showing cached metadata only."
+                      : undefined,
+                  loadDetails: (name) => registry.details(name),
+                },
+                {
+                  autoCheckUpdates: preferences.autoCheckUpdates ?? false,
+                  showCommunityPackages:
+                    preferences.showCommunityPackages ?? true,
+                },
+                (setting, enabled) => {
+                  try {
+                    writeLazyPiState(agentDir, { [setting]: enabled });
+                    return true;
+                  } catch (error) {
+                    ctx.ui.notify(
+                      `Could not save LazyPi preference: ${String(error)}`,
+                      "error",
+                    );
+                    return false;
+                  }
+                },
               );
+              // The first frame renders local/cached data; registry I/O runs afterward.
+              if (remoteSection) {
+                const refresh = forceRefresh;
+                forceRefresh = false;
+                void (async () => {
+                  try {
+                    if (remoteTab === "Community") {
+                      const result = await registry.search(query, refresh);
+                      if (open)
+                        popup.setRemote(
+                          result,
+                          versions,
+                          false,
+                          offline
+                            ? "Offline: showing cached metadata only."
+                            : undefined,
+                        );
+                    } else {
+                      const failed = await registry.checkUpdates(
+                        items,
+                        refresh,
+                      );
+                      for (const item of items) {
+                        if (item.source.startsWith("npm:")) {
+                          const cached = registry.cachedDetails(
+                            identity(item.source).slice(4),
+                          );
+                          if (cached)
+                            versions.set(identity(item.source), cached);
+                        }
+                      }
+                      if (open)
+                        popup.setRemote(
+                          community,
+                          versions,
+                          false,
+                          offline
+                            ? "Offline: showing cached metadata only."
+                            : failed
+                              ? `${failed} package update checks failed; showing cached versions.`
+                              : undefined,
+                        );
+                    }
+                  } catch (error) {
+                    if (open)
+                      popup.setRemote(
+                        community,
+                        versions,
+                        false,
+                        error instanceof Error ? error.message : String(error),
+                      );
+                  }
+                })();
+              }
               return popup;
             },
             {
@@ -206,15 +439,81 @@ export default function (pi: ExtensionAPI) {
               overlayOptions: { anchor: "center", width: 78, maxHeight: 26 },
             },
           );
+          open = false;
+          const previous = active;
           active = popup.section;
           category = popup.category;
           resourceType = popup.resourceType;
           if (choice.action === "close") return;
+          if (choice.action === "update-all") {
+            const failures = await registry.checkUpdates(items);
+            const latest = new Map<string, RemotePackage>();
+            for (const item of items) {
+              if (!item.source.startsWith("npm:")) continue;
+              const pkg = registry.cachedDetails(
+                identity(item.source).slice(4),
+              );
+              if (pkg) latest.set(identity(item.source), pkg);
+            }
+            const updates = updateAllPlan(items, latest);
+            if (!updates.length) {
+              ctx.ui.notify(
+                "No eligible npm updates found. Pinned, git and local sources are not in this list.",
+                "info",
+              );
+              continue;
+            }
+            if (
+              !(await ctx.ui.confirm(
+                "Update all plan",
+                [
+                  ...updates.map(
+                    (item) =>
+                      `${item.source} (${item.scope}, ${item.state}) ${item.version} → ${latest.get(identity(item.source))!.version}`,
+                  ),
+                  ...(failures
+                    ? [
+                        `${failures} registry checks failed; only known updates are listed.`,
+                      ]
+                    : []),
+                  "Pi updates each package identity sequentially in both scopes; disabled filters stay disabled. Continue?",
+                ].join("\n"),
+              ))
+            )
+              continue;
+            const current = createNative(ctx.cwd, ctx.isProjectTrusted());
+            if (
+              JSON.stringify(inventory(current.settings, current.manager)) !==
+              JSON.stringify(items)
+            )
+              throw new Error(
+                "Inventory changed; reopen Updates before retrying.",
+              );
+            const { applied, failed } = await runSequential(updates, (entry) =>
+              execute("update", entry, current.settings, current.manager),
+            );
+            const failure =
+              failed && `${failed.step.source}: ${String(failed.error)}`;
+            ctx.ui.notify(
+              `Updated ${applied.length}/${updates.length} packages${failure ? `; failed: ${failure}. Successful updates kept; retry from Updates.` : "."}`,
+              failure ? "error" : "info",
+            );
+            if (applied.length || failure) {
+              await ctx.reload();
+              return;
+            }
+            continue;
+          }
           if (choice.action === "search") {
             query = (await ctx.ui.input("Search packages", query)) ?? query;
             continue;
           }
-          if (choice.action === "refresh") continue;
+          if (choice.action === "refresh") {
+            forceRefresh =
+              previous === active &&
+              (active === "Community" || active === "Updates");
+            continue;
+          }
           if (
             choice.action === "extra" &&
             choice.extra &&
@@ -366,6 +665,13 @@ export default function (pi: ExtensionAPI) {
           };
           let entry: PackageEntry | undefined = choice.entry;
           if (choice.action === "install") {
+            if (choice.entry) {
+              ctx.ui.notify(
+                `${choice.entry.source} is already configured; use e to enable it.`,
+                "warning",
+              );
+              continue;
+            }
             const source =
               choice.source ??
               (await ctx.ui.input("Install a Pi package", "npm:package-name"));

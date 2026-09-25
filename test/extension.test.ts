@@ -21,6 +21,7 @@ import { ManagerPopup } from "../src/ui.ts";
 test("npm extension entrypoint registers the /lazypi command without side effects", () => {
   const registered: string[] = [];
   extension({
+    on: () => {},
     registerCommand: (name: string) => {
       registered.push(name);
     },
@@ -49,6 +50,7 @@ test("/lazypi extras plans project selections and deselection without uninstalli
   try {
     let handler: RegisteredCommand["handler"] | undefined;
     extension({
+      on: () => {},
       registerCommand: (
         _name: string,
         options: { handler: RegisteredCommand["handler"] },
@@ -130,6 +132,7 @@ test("a selected Extra with a missing package offers a repair plan without chang
   try {
     let handler: RegisteredCommand["handler"] | undefined;
     extension({
+      on: () => {},
       registerCommand: (
         _name: string,
         options: { handler: RegisteredCommand["handler"] },
@@ -184,6 +187,96 @@ test("a selected Extra with a missing package offers a repair plan without chang
   }
 });
 
+test("/lazypi community renders before npm responds and confirms an unverified native install", async () => {
+  const root = mkdtempSync(join(tmpdir(), "lazypi-community-command-"));
+  const agent = join(root, "agent");
+  markSetupComplete(agent);
+  const previousDir = process.env.PI_CODING_AGENT_DIR;
+  const previousFetch = globalThis.fetch;
+  process.env.PI_CODING_AGENT_DIR = agent;
+  let respond!: (response: Response) => void;
+  globalThis.fetch = (async () =>
+    new Promise<Response>((resolve) => {
+      respond = resolve;
+    })) as typeof fetch;
+  try {
+    let handler: RegisteredCommand["handler"] | undefined;
+    extension({
+      on: () => {},
+      registerCommand: (
+        _name: string,
+        command: { handler: RegisteredCommand["handler"] },
+      ) => {
+        handler = command.handler;
+      },
+    } as unknown as Parameters<typeof extension>[0]);
+    assert.ok(handler);
+    let openings = 0;
+    const confirmations: string[] = [];
+    const ctx = {
+      mode: "tui",
+      cwd: root,
+      isProjectTrusted: () => false,
+      ui: {
+        custom: async (
+          factory: Parameters<ExtensionCommandContext["ui"]["custom"]>[0],
+        ) =>
+          new Promise((done) => {
+            const popup = factory(
+              { requestRender: () => {}, terminal: { rows: 24 } } as TUI,
+              { fg: (_color: string, value: string) => value } as Theme,
+              {} as Parameters<typeof factory>[2],
+              done,
+            ) as ManagerPopup;
+            assert.equal(popup.section, "Community");
+            if (openings++ > 0) {
+              popup.handleInput("\u001b");
+              return;
+            }
+            assert.match(popup.render(76).join("\n"), /Loading npm metadata/);
+            void (async () => {
+              await new Promise((resolve) => setImmediate(resolve));
+              respond(
+                new Response(
+                  JSON.stringify({
+                    objects: [
+                      {
+                        package: {
+                          name: "example",
+                          version: "2.0.0",
+                          description: "Community example",
+                          keywords: ["pi-package"],
+                        },
+                      },
+                    ],
+                  }),
+                ),
+              );
+              await new Promise((resolve) => setImmediate(resolve));
+              assert.match(popup.render(76).join("\n"), /example.*unverified/);
+              popup.handleInput("i");
+            })();
+          }),
+        confirm: async (_title: string, message: string) => {
+          confirmations.push(message);
+          return false;
+        },
+        notify: () => {},
+      },
+    } as unknown as ExtensionCommandContext;
+    await handler("community", ctx);
+    assert.equal(openings, 2);
+    assert.match(
+      confirmations[0]!,
+      /Uncurated: third-party code.*npm:example/s,
+    );
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previousDir;
+  }
+});
+
 test("/lazypi shows previously installed Pi packages after deferring first-run setup", async () => {
   const root = mkdtempSync(join(tmpdir(), "lazypi-command-"));
   const agent = join(root, "agent");
@@ -203,6 +296,7 @@ test("/lazypi shows previously installed Pi packages after deferring first-run s
   try {
     let handler: RegisteredCommand["handler"] | undefined;
     extension({
+      on: () => {},
       registerCommand: (
         _name: string,
         options: { handler: RegisteredCommand["handler"] },

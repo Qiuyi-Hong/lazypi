@@ -46,6 +46,67 @@ test("popup renders within narrow terminal widths and supports section navigatio
   );
 });
 
+test("uppercase keys jump to every section without replacing existing actions", () => {
+  const choices: Choice[] = [];
+  const ui = new ManagerPopup(
+    tui,
+    theme,
+    (choice) => choices.push(choice),
+    [],
+    "Installed",
+  );
+  const header = ui.render(76).slice(2, 4).join("\n");
+  for (const [name, key] of [
+    ["Installed", "I"],
+    ["Enabled", "E"],
+    ["Disabled", "D"],
+    ["Core", "C"],
+    ["Extras", "X"],
+    ["Community", "M"],
+    ["Updates", "T"],
+    ["Settings", "S"],
+  ] as const)
+    assert.match(header, new RegExp(`${name} \\(${key}\\)`));
+  assert.doesNotMatch(ui.render(76).join("\n"), /Tab or I E D C X M T S/);
+  for (const [key, section] of [
+    ["E", "Enabled"],
+    ["D", "Disabled"],
+    ["C", "Core"],
+    ["X", "Extras"],
+    ["M", "Community"],
+    ["T", "Updates"],
+    ["S", "Settings"],
+    ["I", "Installed"],
+  ] as const) {
+    ui.handleInput(key);
+    assert.equal(ui.section, section);
+  }
+  assert.deepEqual(
+    choices.map((choice) => choice.action),
+    ["refresh", "refresh"],
+  );
+  ui.handleInput("T");
+  ui.handleInput("U");
+  assert.equal(choices.at(-1)?.action, "update-all");
+
+  const hidden = new ManagerPopup(
+    tui,
+    theme,
+    (choice) => choices.push(choice),
+    [],
+    "Installed",
+    "",
+    [],
+    undefined,
+    "all",
+    {},
+    { autoCheckUpdates: false, showCommunityPackages: false },
+  );
+  hidden.handleInput("M");
+  assert.equal(hidden.section, "Community");
+  assert.equal(choices.at(-1)?.action, "refresh");
+});
+
 test("Extras show Pi installation independently of selection, including incomplete workflows", () => {
   const installed = {
     source: "npm:pi-subagents@1",

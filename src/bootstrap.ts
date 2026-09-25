@@ -55,6 +55,8 @@ type LazyPiState = {
   version: 1;
   bootstrapComplete?: boolean;
   enabledExtras?: string[];
+  autoCheckUpdates?: boolean;
+  showCommunityPackages?: boolean;
 };
 
 export function readLazyPiState(dir: string): LazyPiState {
@@ -70,7 +72,11 @@ export function readLazyPiState(dir: string): LazyPiState {
       typeof data.bootstrapComplete !== "boolean") ||
     ("enabledExtras" in data &&
       (!Array.isArray(data.enabledExtras) ||
-        data.enabledExtras.some((id: unknown) => typeof id !== "string")))
+        data.enabledExtras.some((id: unknown) => typeof id !== "string"))) ||
+    ("autoCheckUpdates" in data &&
+      typeof data.autoCheckUpdates !== "boolean") ||
+    ("showCommunityPackages" in data &&
+      typeof data.showCommunityPackages !== "boolean")
   )
     throw new Error(`Invalid LazyPi state: ${file}`);
   return data as LazyPiState;

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.2 (2026-09-25)
+
+### Added
+
+- Settings tab with persisted startup update checks and Community tab visibility; asynchronous startup notifications for available updates.
+- Read-only `/lazypi health` diagnostics and confirmed `/lazypi sync` repairs for Core/selected Extras, including disabled packages.
+- `U` update-all plan for eligible unpinned npm packages across both scopes; sequential native updates, partial failure reporting and retry guidance.
+- Community search for npm `pi-package` packages, on-demand published-manifest details, unverified install confirmation, offline-capable one-hour metadata cache and manual refresh.
+- Updates tab with cached latest-version checks for installed unversioned npm packages in either scope; update actions remain native Pi operations and retain disabled filters.
+- Direct section shortcuts shown beside each section name.
+
+### Fixed
+
+- Settings toggles update in place without closing and reopening the popup.
+
 ## 0.2.1 (2026-09-24)
 
 ### Fixed
