@@ -85,7 +85,7 @@ test("native Pi inventory adopts an existing npm Core installation and unrelated
     { fg: (_color: string, text: string) => text } as Theme,
     () => {},
     items,
-    "Installed",
+    "Packages",
   );
   assert.ok(ui.render(76).some((line) => line.includes("my-existing-package")));
   assert.deepEqual(corePlan(items).missing, [

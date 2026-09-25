@@ -188,7 +188,7 @@ test("Settings has only the update switch; Community remains in tab navigation",
   assert.match(popup.render(76).join("\n"), /Community \(M\)/);
   popup.handleInput(" ");
   popup.handleInput("\t");
-  assert.equal(popup.section, "Installed");
+  assert.equal(popup.section, "Packages");
   assert.deepEqual(choices, ["autoCheckUpdates:false"]);
   const updates = new ManagerPopup(
     tui,

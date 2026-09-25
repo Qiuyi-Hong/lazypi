@@ -277,6 +277,70 @@ test("/lazypi community renders before npm responds and confirms an unverified n
   }
 });
 
+test("/lazypi and /lazypi installed open the same Pi inventory", async () => {
+  const root = mkdtempSync(join(tmpdir(), "lazypi-packages-command-"));
+  const agent = join(root, "agent");
+  mkdirSync(agent);
+  mkdirSync(join(root, ".pi"));
+  writeFileSync(
+    join(agent, "settings.json"),
+    JSON.stringify({ packages: ["npm:pi-subagents"] }),
+  );
+  writeFileSync(
+    join(root, ".pi", "settings.json"),
+    JSON.stringify({ packages: ["./absent-package"] }),
+  );
+  markSetupComplete(agent);
+  const previous = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = agent;
+  try {
+    let handler!: RegisteredCommand["handler"];
+    extension({
+      on: () => {},
+      registerCommand: (
+        _name: string,
+        command: { handler: RegisteredCommand["handler"] },
+      ) => {
+        handler = command.handler;
+      },
+    } as unknown as Parameters<typeof extension>[0]);
+    const frames: string[] = [];
+    const notifications: string[] = [];
+    const ctx = {
+      mode: "tui",
+      cwd: root,
+      isProjectTrusted: () => true,
+      ui: {
+        custom: async (
+          factory: Parameters<ExtensionCommandContext["ui"]["custom"]>[0],
+        ) => {
+          const popup = factory(
+            { requestRender: () => {}, terminal: { rows: 24 } } as TUI,
+            { fg: (_color: string, text: string) => text } as Theme,
+            {} as Parameters<typeof factory>[2],
+            () => {},
+          ) as ManagerPopup;
+          assert.equal(popup.section, "Packages");
+          frames.push(popup.render(76).join("\n"));
+          return { action: "close" };
+        },
+        notify: (message: string) => notifications.push(message),
+      },
+    } as unknown as ExtensionCommandContext;
+    await handler("", ctx);
+    await handler("installed", ctx);
+    assert.deepEqual(notifications, []);
+    assert.equal(frames.length, 2);
+    assert.equal(frames[0], frames[1]);
+    assert.match(frames[0]!, /pi-subagents.*missing · user/);
+    assert.match(frames[0]!, /absent-package.*missing · project/);
+    assert.doesNotMatch(frames[0]!, /pi-mcp-adapter.*not installed/);
+  } finally {
+    if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previous;
+  }
+});
+
 test("/lazypi shows previously installed Pi packages after deferring first-run setup", async () => {
   const root = mkdtempSync(join(tmpdir(), "lazypi-command-"));
   const agent = join(root, "agent");
