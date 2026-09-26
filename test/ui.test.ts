@@ -112,6 +112,9 @@ test("short registry errors leave the selected row and exit visible", () => {
     "offline",
   );
   assert.match(ui.render(30).at(-2)!, /↑↓ 1\/2 · Registry!/);
+  ui.handleInput("\r");
+  assert.match(ui.render(30).at(-2)!, /Registry!/);
+  assert.match(ui.render(30).at(-2)!, /Esc/);
 });
 
 test("detail scrolling reveals wrapped fields without changing selection or frame", () => {
@@ -165,6 +168,183 @@ test("detail scrolling reveals wrapped fields without changing selection or fram
   assert.match(ui.render(46).join("\n"), /› 包-kit/);
   ui.handleInput("j");
   assert.match(ui.render(46).join("\n"), /› next/);
+});
+
+test("Packages details reveal only local facts for both scopes and scroll through wide text", () => {
+  const terminal = { requestRender: () => {}, terminal: { rows: 12 } };
+  const description = "包🙂 ".repeat(55) + "DESCRIPTION END";
+  const source = `./${"nested/".repeat(25)}包-source`;
+  const entries = [
+    {
+      source,
+      name: "包-kit",
+      scope: "user" as const,
+      state: "shadowed" as const,
+      description,
+      path: "/local/包-kit",
+      version: "1.2.3",
+      resources: ["skills", "extensions"],
+      repository: "https://example.com/" + "long/".repeat(25) + "REPO END",
+      author: "Ada 包",
+    },
+    {
+      source,
+      name: "包-kit",
+      scope: "project" as const,
+      state: "disabled" as const,
+      path: "/project/包-kit",
+      resources: [],
+      error: "Invalid package manifest: pi.skills must be an array of paths",
+    },
+    {
+      source: "./absent",
+      name: "absent",
+      scope: "project" as const,
+      state: "missing" as const,
+      resources: [],
+    },
+  ];
+  const ui = new ManagerPopup(
+    terminal as TUI,
+    theme,
+    () => {},
+    entries,
+    "Packages",
+    "",
+    [{ id: "pi-web-access", scope: "project" }],
+    undefined,
+    "all",
+    {
+      versions: new Map([
+        [
+          source,
+          {
+            source,
+            name: "包-kit",
+            description: "REGISTRY CLAIM",
+            version: "99.0.0",
+            resources: [],
+          },
+        ],
+      ]),
+    },
+  );
+  const check = (width: number) => {
+    const frame = ui.render(width);
+    assert.equal(frame.length, Math.min(26, terminal.terminal.rows - 2));
+    for (const row of frame) assert.equal(visibleWidth(row), width);
+    assert.match(frame.at(-2)!, /Esc back/);
+    return frame.join("\n");
+  };
+  ui.handleInput("\r");
+  let seen = check(34).replace(/[│\n]/g, " ");
+  for (let n = 0; n < 100; n++) {
+    ui.handleInput("j");
+    seen += " " + check(34).replace(/[│\n]/g, " ");
+  }
+  assert.match(seen, /Pi state \(user\): shadowed/);
+  assert.match(seen, /Pi state \(project\): disabled/);
+  assert.match(seen, /Description: 包/);
+  assert.match(seen, /DESCRIPTION\s+END/);
+  assert.match(seen, /Source:\s+\.\/nested/);
+  assert.match(seen, /-source/);
+  assert.match(seen, /Version: 1\.2\.3/);
+  assert.match(seen, /Resources: skills, extensions/);
+  assert.match(seen, /REPO\s+END/);
+  assert.match(seen, /Author: Ada 包/);
+  assert.match(seen, /Required by:/);
+  assert.doesNotMatch(seen, /REGISTRY CLAIM|99\.0\.0/);
+  assert.match(check(34).split("\n").at(-2)!, /end/);
+  terminal.terminal.rows = 24;
+  assert.match(check(80), /Esc back/);
+  ui.setRemote([], new Map(), false, "offline");
+  assert.doesNotMatch(check(80), /REGISTRY CLAIM/);
+  terminal.terminal.rows = 12;
+  check(34);
+  ui.handleInput("\u001b");
+  assert.match(ui.render(34).join("\n"), /› 包-kit/);
+  ui.handleInput("j");
+  ui.handleInput("\r");
+  let invalid = check(34);
+  for (let n = 0; n < 100 && !invalid.includes("pi.skills must"); n++) {
+    ui.handleInput("j");
+    invalid = check(34);
+  }
+  assert.match(invalid, /pi.skills must/);
+  assert.doesNotMatch(invalid, /REGISTRY CLAIM/);
+  ui.handleInput("\u001b");
+  assert.match(ui.render(34).join("\n"), /› 包-kit.*disabled · project/);
+  ui.handleInput("j");
+  ui.handleInput("\r");
+  let missing = check(34);
+  for (let n = 0; n < 30; n++) {
+    ui.handleInput("j");
+    missing += "\n" + check(34);
+  }
+  assert.match(missing, /Source: \.\/absent/);
+  assert.match(
+    missing.replace(/[│\n]/g, " "),
+    /Scope: project · State:\s+missing/,
+  );
+  assert.match(missing, /Installed path: missing/);
+  ui.handleInput("\u001b");
+  assert.match(ui.render(34).join("\n"), /› absent.*missing · project/);
+
+  const related = new ManagerPopup(
+    { requestRender: () => {}, terminal: { rows: 24 } } as TUI,
+    theme,
+    () => {},
+    [{ ...entries[2]!, source: "npm:pi-web-access" }],
+    "Packages",
+    "",
+    [{ id: "pi-web-access", scope: "project" }],
+  );
+  related.handleInput("\r");
+  assert.match(
+    related.render(120).join("\n"),
+    /Required by: LazyPi Core, pi-web-access \(project\)/,
+  );
+});
+
+test("Enter on an empty Packages list keeps the exit control", () => {
+  const ui = new ManagerPopup(tui, theme, () => {}, [], "Packages");
+  ui.handleInput("\r");
+  assert.match(ui.render(80).at(-2)!, /Esc close/);
+});
+
+test("Packages detail return keeps the same list viewport after resize", () => {
+  const terminal = { requestRender: () => {}, terminal: { rows: 20 } };
+  const entries = Array.from({ length: 35 }, (_, n) => ({
+    source: `npm:item-${n}`,
+    name: `item-${n}`,
+    scope: "user" as const,
+    state: "enabled" as const,
+    description: "long ".repeat(80),
+    resources: [],
+  }));
+  const choices: Choice[] = [];
+  const ui = new ManagerPopup(
+    terminal as TUI,
+    theme,
+    (choice) => choices.push(choice),
+    entries,
+    "Packages",
+  );
+  for (let n = 0; n < 22; n++) ui.handleInput("j");
+  const before = ui.render(70).join("\n");
+  ui.handleInput("\r");
+  ui.render(70);
+  for (let n = 0; n < 20; n++) ui.handleInput("j");
+  ui.handleInput("x");
+  assert.deepEqual(choices, []);
+  ui.setRemote([], new Map(), false);
+  terminal.terminal.rows = 12;
+  ui.render(34);
+  terminal.terminal.rows = 20;
+  ui.handleInput("\u001b");
+  assert.equal(ui.render(70).join("\n"), before);
+  ui.handleInput("x");
+  assert.deepEqual(choices, [{ action: "remove", entry: entries[22] }]);
 });
 
 test("semantic colors and selected background keep written status and width safe", () => {
@@ -957,6 +1137,12 @@ test("Packages inspector follows selection only when the frame can hold it", () 
   assert.match(shortLines.join("\n"), /\u203a \u5305/);
   assert.doesNotMatch(shortLines.join("\n"), /Source:/);
   short.handleInput("\r");
+  for (
+    let n = 0;
+    n < 10 && !short.render(120).join("\n").includes("Repository:");
+    n++
+  )
+    short.handleInput("j");
   assert.match(short.render(120).join("\n"), /Repository:/);
   short.handleInput("\u001b");
   assert.doesNotMatch(short.render(120).join("\n"), /Source:/);
