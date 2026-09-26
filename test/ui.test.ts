@@ -306,6 +306,182 @@ test("Packages details reveal only local facts for both scopes and scroll throug
   );
 });
 
+test("Core keeps catalog entries separate from absent, missing and installed Pi declarations", () => {
+  const terminal = { requestRender: () => {}, terminal: { rows: 24 } };
+  const choices: Choice[] = [];
+  const entries = [
+    {
+      source: "npm:pi-subagents@4.0.0",
+      name: "pi-subagents",
+      scope: "project" as const,
+      state: "missing" as const,
+      resources: [],
+    },
+    {
+      source: "npm:pi-web-access",
+      name: "pi-web-access",
+      scope: "user" as const,
+      state: "shadowed" as const,
+      path: "/user/web",
+      version: "1.0.0",
+      resources: ["skills"],
+    },
+    {
+      source: "npm:pi-web-access",
+      name: "pi-web-access",
+      scope: "project" as const,
+      state: "disabled" as const,
+      path: "/project/web",
+      version: "2.0.0",
+      description: "Installed manifest description",
+      repository: "https://example.com/web",
+      author: "Ada",
+      resources: ["extensions"],
+    },
+  ];
+  const ui = new ManagerPopup(
+    terminal as TUI,
+    theme,
+    (choice) => choices.push(choice),
+    entries,
+    "Core",
+  );
+  const frame = (width: number) => {
+    const lines = ui.render(width);
+    assert.equal(lines.length, Math.min(26, terminal.terminal.rows - 2));
+    for (const line of lines) assert.equal(visibleWidth(line), width);
+    assert.match(lines[0]!, /╭.*╮/);
+    assert.match(lines.at(-1)!, /╰.*╯/);
+    assert.match(lines.at(-2)!, /Esc/);
+    return lines.join("\n");
+  };
+  assert.match(frame(120), /MCP Adapter.*not installed/);
+  assert.match(frame(120), /Subagents.*missing/);
+  assert.match(frame(120), /Web Access.*disabled/);
+  ui.handleInput("\r");
+  const absent = frame(120);
+  assert.match(absent, /MCP Adapter/);
+  assert.match(absent, /Category: Integrations/);
+  assert.match(absent, /Connect Pi to MCP tools and services/);
+  assert.match(absent, /not installed/);
+  assert.doesNotMatch(
+    absent,
+    /Source:|Scope:|Version:|Resources:|Installed path:|choose at install|State: enabled/,
+  );
+  ui.handleInput("i"); // Core actions remain available in details.
+  assert.deepEqual(choices.pop(), {
+    action: "install",
+    source: "npm:pi-mcp-adapter",
+    entry: undefined,
+  });
+  ui.handleInput("\u001b");
+  assert.match(frame(120), /› MCP Adapter/);
+  ui.handleInput("i");
+  assert.deepEqual(choices.pop(), {
+    action: "install",
+    source: "npm:pi-mcp-adapter",
+    entry: undefined,
+  });
+
+  ui.handleInput("j");
+  assert.match(frame(120), /› Subagents.*missing/);
+  ui.handleInput("\r");
+  const missing = frame(120);
+  assert.match(missing, /Category: AI/);
+  assert.match(missing, /Scope: project · State: missing/);
+  assert.match(missing, /Source: npm:pi-subagents@4\.0\.0/);
+  assert.match(missing, /Installed path: missing/);
+  assert.doesNotMatch(
+    missing,
+    /Version:|Resources:|Author:|Repository:|choose at install/,
+  );
+  ui.handleInput("\u001b");
+  assert.match(frame(120), /› Subagents.*missing/);
+  ui.handleInput("i");
+  assert.deepEqual(choices.pop(), {
+    action: "install",
+    entry: entries[0],
+    source: undefined,
+  });
+
+  ui.handleInput("j");
+  assert.match(frame(120), /› Web Access.*disabled/);
+  ui.handleInput("\r");
+  for (const [width, rows] of [
+    [120, 30],
+    [46, 12],
+    [30, 8],
+  ]) {
+    terminal.terminal.rows = rows;
+    frame(width); // Clamp after resize before scrolling back to the first field.
+    for (let n = 0; n < 40; n++) ui.handleInput("k");
+    let seen = "";
+    for (let n = 0; n < 40; n++) {
+      const current = frame(width);
+      seen += " " + current.replace(/[│\n]/g, " ");
+      if (current.split("\n").at(-2)!.includes("end")) break;
+      ui.handleInput("j");
+    }
+    assert.match(seen, /Category: Research/);
+    assert.match(seen, /Scope: project · State:/);
+    assert.match(seen, /Scope: user · State:/);
+    assert.match(seen, /disabled/);
+    assert.match(seen, /shadowed/);
+    assert.match(seen, /Version: 2\.0\.0/);
+    assert.match(seen, /Version: 1\.0\.0/);
+    assert.match(seen, /Local description:/);
+    assert.match(seen, /Installed manifest/);
+    assert.match(seen, /Resources: extensions/);
+    assert.match(seen, /Repository:/);
+    assert.match(seen, /https:\/\/example.com\/web/);
+    assert.match(seen, /Author: Ada/);
+    assert.match(frame(width).split("\n").at(-2)!, /end/);
+  }
+  ui.handleInput("\u001b");
+  assert.match(frame(30), /› Web Access/);
+  assert.match(frame(30), /disabled/);
+  ui.handleInput("d");
+  assert.deepEqual(choices.pop(), { action: "disable", entry: entries[2] });
+});
+
+test("Core details retain installed user facts alongside a missing project override", () => {
+  const ui = new ManagerPopup(
+    tui,
+    theme,
+    () => {},
+    [
+      {
+        source: "npm:pi-subagents@1.0.0",
+        name: "pi-subagents",
+        scope: "user",
+        state: "shadowed",
+        path: "/user/subagents",
+        version: "1.0.0",
+        resources: [],
+        error: "Invalid package manifest: pi.skills must be an array of paths",
+      },
+      {
+        source: "npm:pi-subagents@2.0.0",
+        name: "pi-subagents",
+        scope: "project",
+        state: "missing",
+        resources: [],
+      },
+    ],
+    "Core",
+  );
+  ui.handleInput("j");
+  assert.match(ui.render(120).join("\n"), /› Subagents.*missing/);
+  ui.handleInput("\r");
+  const detail = ui.render(120).join("\n");
+  assert.match(detail, /Scope: user · State: shadowed/);
+  assert.match(detail, /Version: 1\.0\.0/);
+  assert.match(detail, /Invalid package manifest: pi.skills/);
+  assert.match(detail, /Scope: project · State: missing/);
+  assert.match(detail, /Source: npm:pi-subagents@2\.0\.0/);
+  assert.doesNotMatch(detail, /Resources: none detected|Version: 2\.0\.0/);
+});
+
 test("Enter on an empty Packages list keeps the exit control", () => {
   const ui = new ManagerPopup(tui, theme, () => {}, [], "Packages");
   ui.handleInput("\r");
