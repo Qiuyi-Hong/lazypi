@@ -8,7 +8,7 @@ import type {
   RegisteredCommand,
   Theme,
 } from "@earendil-works/pi-coding-agent";
-import type { TUI } from "@earendil-works/pi-tui";
+import { visibleWidth, type TUI } from "@earendil-works/pi-tui";
 import extension from "../extensions/lazypi.ts";
 import { markSetupComplete } from "../src/bootstrap.ts";
 import {
@@ -334,6 +334,35 @@ test("/lazypi community renders before npm responds and confirms an unverified n
                 popup.render(76).join("\n"),
                 /example[\s\S]*unverified/,
               );
+              popup.handleInput("\r");
+              assert.match(popup.render(76).join("\n"), /Details: not loaded/);
+              await new Promise((resolve) => setImmediate(resolve));
+              respond(
+                new Response(
+                  JSON.stringify({
+                    name: "example",
+                    version: "2.0.0",
+                    description: "Publisher details",
+                    author: "Publisher",
+                    dependencies: { proof: "^1" },
+                  }),
+                ),
+              );
+              await new Promise((resolve) => setImmediate(resolve));
+              const frame = popup.render(76);
+              assert.equal(frame.length, 22);
+              for (const line of frame) assert.equal(visibleWidth(line), 76);
+              let details = "";
+              for (let n = 0; n < 30; n++) {
+                details += popup.render(76).join("\n");
+                popup.handleInput("j");
+              }
+              assert.match(details, /npm dependencies: proof/);
+              assert.match(
+                details,
+                /npm author \(publisher-supplied\): Publisher/,
+              );
+              popup.handleInput("\u001b");
               popup.handleInput("i");
             })();
           }),

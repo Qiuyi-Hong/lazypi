@@ -27,6 +27,14 @@ const pkg = (name: string, version = "2.0.0") => ({
   author: { name: "Author" },
   dependencies: { safe: "^1" },
 });
+const detailText = (ui: ManagerPopup, width = 100) => {
+  const frames: string[] = [];
+  for (let i = 0; i < 100; i++) {
+    frames.push(ui.render(width).join("\n"));
+    ui.handleInput("j");
+  }
+  return frames.join("\n");
+};
 const entry = (
   source = "npm:example",
   version = "1.0.0",
@@ -66,6 +74,10 @@ test("npm search only accepts Pi packages and manifests supply all resource type
     parseDetails({ ...pkg("example"), description: "hi\u001b[31m" })
       .description,
     "hi [31m",
+  );
+  assert.doesNotMatch(
+    parseDetails({ ...pkg("example"), author: "name\u202eadmin" }).author ?? "",
+    /\u202e/,
   );
   assert.equal(isCurated("npm:pi-subagents"), true);
   assert.equal(isCurated("npm:example"), false);
@@ -238,6 +250,184 @@ test("update snapshots retain stale versions and report partial refresh failures
   assert.equal(registry.cachedUpdates([entry("npm:second")]).size, 1);
 });
 
+test("new search versions retain cached details and their timestamp until a replacement arrives", async () => {
+  const path = dir();
+  let time = 1_000_000;
+  let version = "1.0.0";
+  const registry = new CommunityRegistry(
+    path,
+    async (url) =>
+      new Response(
+        JSON.stringify(
+          String(url).includes("/search")
+            ? { objects: [{ package: pkg("example", version) }] }
+            : pkg("example", version),
+        ),
+      ),
+    () => time,
+  );
+  await registry.search("");
+  await registry.details("example");
+  const saved = registry.cachedDetails("example");
+  version = "2.0.0";
+  time += 1000;
+  await registry.search("", true);
+  assert.deepEqual(registry.cachedDetails("example"), saved);
+  assert.equal(registry.cachedDetail("example")?.timestamp, 1_000_000);
+  assert.equal(registry.cachedSearchAt(""), time);
+  assert.equal((await registry.details("example")).version, "2.0.0");
+  assert.equal(registry.cachedDetail("example")?.timestamp, time);
+});
+
+test("Community details separate Pi facts from publisher metadata and cache states", async () => {
+  const tui = { requestRender: () => {}, terminal: { rows: 24 } } as TUI;
+  const theme = { fg: (_color: string, content: string) => content } as Theme;
+  const remote = parseDetails({
+    ...pkg("example"),
+    description: "Publisher bio",
+    pi: {},
+    dependencies: {},
+  });
+  const local = {
+    ...entry("npm:example@1.2.3"),
+    error: "Invalid package manifest",
+    description: undefined,
+  };
+  const registry = new CommunityRegistry(
+    dir(),
+    async () => new Response(JSON.stringify(pkg("example"))),
+  );
+  const ui = new ManagerPopup(
+    tui,
+    theme,
+    () => {},
+    [local],
+    "Community",
+    "",
+    [],
+    undefined,
+    "all",
+    {
+      community: [remote],
+      cachedDetails: (name) => registry.cachedDetail(name),
+      searchTimestamp: 1_000_000,
+      offline: true,
+    },
+  );
+  ui.handleInput("\r");
+  let text = detailText(ui);
+  assert.match(text, /Pi state \(project\): disabled/);
+  assert.match(text, /Pi description: unknown/);
+  assert.match(text, /npm description \(publisher-supplied\): Publisher bio/);
+  assert.match(text, /Details: offline—not cached/);
+  assert.match(text, /npm declared resources: unknown/);
+  assert.match(text, /Invalid package manifest/);
+  assert.doesNotMatch(text, /Pi description: Publisher bio/);
+
+  const online = new ManagerPopup(
+    tui,
+    theme,
+    () => {},
+    [],
+    "Community",
+    "",
+    [],
+    undefined,
+    "all",
+    {
+      community: [remote],
+      cachedDetails: (name) => registry.cachedDetail(name),
+    },
+  );
+  online.handleInput("\r");
+  assert.match(online.render(100).join("\n"), /Details: not loaded/);
+  await registry.details("example");
+  online.setRemote([remote], new Map(), false, "refresh failed");
+  text = detailText(online);
+  assert.match(text, /Details: cached at/);
+  assert.match(text, /Registry: refresh failed/);
+  assert.match(text, /npm dependencies: safe/);
+});
+
+test("Community detail arrival keeps the frame fixed, scrolls long fields and ignores disposal", async () => {
+  let resolve!: (value: RemotePackage) => void;
+  let renders = 0;
+  const tui = {
+    requestRender: () => {
+      renders++;
+    },
+    terminal: { rows: 22 },
+  } as TUI;
+  const theme = { fg: (_color: string, content: string) => content } as Theme;
+  const remote = parseDetails(pkg("example"));
+  const ui = new ManagerPopup(
+    tui,
+    theme,
+    () => {},
+    [],
+    "Community",
+    "",
+    [],
+    undefined,
+    "all",
+    {
+      community: [remote],
+      loadDetails: () =>
+        new Promise((done) => {
+          resolve = done;
+        }),
+    },
+  );
+  ui.handleInput("\r");
+  const before = ui.render(32);
+  resolve({
+    ...remote,
+    description: "long ".repeat(70),
+    dependencies: ["last-dependency"],
+  });
+  await new Promise((done) => setImmediate(done));
+  const after = ui.render(32);
+  assert.equal(after.length, before.length);
+  for (const line of after) assert.equal(visibleWidth(line), 32);
+  for (let i = 0; i < 150; i++) {
+    ui.render(32);
+    ui.handleInput("j");
+  }
+  assert.match(ui.render(32).join("\n"), /last-dependency/);
+  assert.match(ui.render(32).at(-2)!, /Esc/);
+  ui.handleInput("\u001b");
+  assert.match(ui.render(32).join("\n"), /› example/);
+  ui.dispose();
+  const count = renders;
+  ui.setRemote([], new Map(), false);
+  assert.equal(renders, count);
+  const pending = new ManagerPopup(
+    tui,
+    theme,
+    () => {},
+    [],
+    "Community",
+    "",
+    [],
+    undefined,
+    "all",
+    {
+      community: [remote],
+      loadDetails: () =>
+        new Promise((done) => {
+          resolve = done;
+        }),
+    },
+  );
+  pending.handleInput("\r");
+  pending.dispose();
+  const beforeLate = renders;
+  resolve({ ...remote, author: "late" });
+  await new Promise((done) => setImmediate(done));
+  assert.equal(renders, beforeLate);
+  assert.doesNotMatch(pending.render(80).join("\n"), /late/);
+});
+
 test("Community popup shows unverified state, fetches manifest on demand and offers native source", async () => {
   const choices: Choice[] = [];
   const tui = { requestRender: () => {}, terminal: { rows: 24 } } as TUI;
@@ -268,7 +458,10 @@ test("Community popup shows unverified state, fetches manifest on demand and off
   );
   popup.handleInput("\r");
   await new Promise((resolve) => setImmediate(resolve));
-  assert.match(popup.render(76).join("\n"), /Author/);
+  assert.match(
+    detailText(popup, 76),
+    /npm author \(publisher-supplied\): Author/,
+  );
   popup.handleInput("\r");
   popup.handleInput("u");
   assert.deepEqual(
@@ -378,7 +571,7 @@ test("Community list and details keep Pi state and unverified ahead of registry 
     const text = lines.join("\n");
     assert.match(text, /unverified/);
     assert.match(text, /State: not installed/);
-    assert.match(text, /Version: unknown/);
+    assert.match(text, /Version: unknown \(Pi: not/);
     assert.doesNotMatch(text, /State:.*9{6}/);
     assert.doesNotMatch(text, /Version: 9{6}/);
     assert.doesNotMatch(text, /\u203a/);

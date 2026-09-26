@@ -74,7 +74,11 @@ type Row = {
   core?: PackageSpec;
 };
 
-const plain = (value: string) => value.replace(/[\x00-\x1f\x7f-\x9f]/g, " ");
+const plain = (value: string) =>
+  value.replace(
+    /[\x00-\x1f\x7f-\x9f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g,
+    " ",
+  );
 
 function extraRow(
   name: string,
@@ -207,6 +211,11 @@ export class ManagerPopup implements Component {
   private community: RemotePackage[];
   private versions: Map<string, RemotePackage>;
   private loadDetails?: (name: string) => Promise<RemotePackage>;
+  private cachedDetails?: (
+    name: string,
+  ) => { value: RemotePackage; timestamp: number } | undefined;
+  private searchTimestamp?: number;
+  private offline: boolean;
   private loading: boolean;
   private remoteError?: string;
   private detailsByName = new Map<string, RemotePackage>();
@@ -230,6 +239,11 @@ export class ManagerPopup implements Component {
       loading?: boolean;
       error?: string;
       loadDetails?: (name: string) => Promise<RemotePackage>;
+      cachedDetails?: (
+        name: string,
+      ) => { value: RemotePackage; timestamp: number } | undefined;
+      searchTimestamp?: number;
+      offline?: boolean;
     } = {},
     preferences = { autoCheckUpdates: false },
     onSettingChange: (setting: Preference, enabled: boolean) => boolean = () =>
@@ -249,6 +263,9 @@ export class ManagerPopup implements Component {
     this.loading = remote.loading ?? false;
     this.remoteError = remote.error;
     this.loadDetails = remote.loadDetails;
+    this.cachedDetails = remote.cachedDetails;
+    this.searchTimestamp = remote.searchTimestamp;
+    this.offline = remote.offline ?? false;
     this.preferences = preferences;
     this.onSettingChange = onSettingChange;
   }
@@ -258,6 +275,7 @@ export class ManagerPopup implements Component {
     versions: Map<string, RemotePackage>,
     loading = false,
     error?: string,
+    searchTimestamp?: number,
   ): void {
     if (this.disposed) return;
     const selected = this.rows()[this.selected];
@@ -265,6 +283,7 @@ export class ManagerPopup implements Component {
     this.versions = versions;
     this.loading = loading;
     this.remoteError = error;
+    if (searchTimestamp !== undefined) this.searchTimestamp = searchTimestamp;
     const rows = this.rows();
     const index = rows.findIndex((row) =>
       selected?.entry
@@ -309,6 +328,56 @@ export class ManagerPopup implements Component {
           })
         : ["Packages: none (dependency workflow)"]),
     ];
+  }
+
+  private communityFacts(row: Row): string[] {
+    const e = row.entry;
+    const search = row.remote!; // Community rows always originate from a registry result.
+    const cached = this.cachedDetails?.(search.name);
+    const fetched = this.detailsByName.get(search.name);
+    const npm = fetched ?? cached?.value ?? search;
+    const loaded = !!(fetched || cached);
+    const absent = loaded ? "not provided" : "unknown";
+    const localAbsent =
+      e?.path && !e.error ? "not provided locally" : "unknown";
+    const peers = this.items.filter(
+      (item) => identity(item.source) === row.source,
+    );
+    const status = cached
+      ? `cached at ${new Date(cached.timestamp).toLocaleString()}${cached.value.version !== search.version ? " (older than npm search)" : ""}${this.remoteError ? " (stale; refresh failed)" : ""}`
+      : fetched
+        ? "loaded"
+        : this.offline
+          ? "offline—not cached"
+          : this.remoteError
+            ? "not loaded (refresh failed)"
+            : "not loaded";
+    return [
+      row.name,
+      "unverified",
+      `Source: ${e?.source ?? row.source}`,
+      `Scope: ${e?.scope ?? "choose at install"}`,
+      `State: ${e?.state ?? "not installed"}`,
+      ...peers.map((item) => `Pi state (${item.scope}): ${item.state}`),
+      `Version: ${e?.version ?? "unknown"} (Pi${e?.path ? " installed" : ": not installed"})`,
+      `Pi resources: ${e?.path && !e.error ? e.resources.join(", ") || "none detected" : "unknown"}`,
+      `Pi description: ${e?.description ?? localAbsent}`,
+      `Pi repository: ${e?.repository ?? localAbsent}`,
+      `Pi author: ${e?.author ?? localAbsent}`,
+      `Details: ${status}`,
+      ...(this.searchTimestamp === undefined
+        ? []
+        : [`Search cache: ${new Date(this.searchTimestamp).toLocaleString()}`]),
+      `Required by: ${requiredBy(e?.source ?? row.source!, this.selections).join(", ") || "no LazyPi selection"}`,
+      `npm latest: ${search.version}`,
+      `npm description (publisher-supplied): ${npm.description || search.description || absent}`,
+      `npm declared resources: ${npm.resources.join(", ") || "unknown"}`,
+      `npm repository (publisher-supplied): ${npm.repository || search.repository || absent}`,
+      `npm author (publisher-supplied): ${npm.author || search.author || absent}`,
+      `npm published: ${npm.published || search.published || "unknown"}`,
+      `npm dependencies: ${npm.dependencies?.join(", ") || "unknown"}`,
+      ...(e?.error ? [e.error] : []),
+    ].map(plain);
   }
 
   private rows(): Row[] {
@@ -524,27 +593,21 @@ export class ManagerPopup implements Component {
         ? coreDetails(current.core, this.items)
         : local
           ? localDetails(e, this.items, this.selections)
-          : [];
+          : this.section === "Community"
+            ? this.communityFacts(current)
+            : [];
       const remote =
         !local &&
         current.remote &&
         (this.detailsByName.get(current.remote.name) ?? current.remote);
-      if (!local && !current.core) {
+      if (!local && !current.core && this.section !== "Community") {
         detail.push(plain(current.name));
-        if (this.section === "Community") detail.push("unverified");
         if (!current.extra)
           detail.push(
             plain(`Source: ${e?.source ?? current.source ?? ""}`),
-            ...(this.section === "Community"
-              ? [
-                  plain(`Scope: ${e?.scope ?? "choose at install"}`),
-                  plain(`State: ${e?.state ?? "not installed"}`),
-                ]
-              : [
-                  plain(
-                    `Scope: ${e?.scope ?? "choose at install"} · State: ${current.state}`,
-                  ),
-                ]),
+            plain(
+              `Scope: ${e?.scope ?? "choose at install"} · State: ${current.state}`,
+            ),
             plain(
               `Version: ${e?.version ?? "unknown"} · Resources: ${e?.resources.join(", ") || "unknown"}`,
             ),
@@ -570,10 +633,8 @@ export class ManagerPopup implements Component {
         }
         if (remote)
           detail.push(
-            this.section === "Community"
-              ? `Latest: ${plain(remote.version)}`
-              : `Community · unverified · latest ${plain(remote.version)}`,
-            `Provides: ${plain(remote.resources.join(", ")) || "unknown (manifest not loaded)"}`,
+            `Community · unverified · latest ${plain(remote.version)}`,
+            `Provides: ${plain(remote.resources.join(", ") || "unknown (manifest not loaded)")}`,
             `Repository: ${plain(remote.repository || "unknown")} · Author: ${plain(remote.author || "unknown")}`,
             `Published: ${plain(remote.published || "unknown")}`,
             `Dependencies: ${plain(remote.dependencies?.join(", ") || "unknown")}`,
@@ -715,12 +776,14 @@ export class ManagerPopup implements Component {
             ),
           );
           const latest = item.remote?.version
-            ? ` · latest ${plain(item.remote.version)}`
+            ? ` · npm latest ${plain(item.remote.version)}`
             : "";
           body.push(
             this.theme.fg(
               "muted",
-              line(`  unverified${latest}  ${plain(item.description)}`),
+              line(
+                `  unverified${latest} · npm description (publisher-supplied): ${plain(item.remote?.description || "unknown")}${this.searchTimestamp !== undefined ? ` · cached at ${new Date(this.searchTimestamp).toLocaleString()}` : ""}`,
+              ),
             ),
           );
         } else {
@@ -1009,21 +1072,22 @@ export class ManagerPopup implements Component {
           row?.remote &&
           this.loadDetails
         ) {
-          void this.loadDetails(row.remote.name)
-            .then((pkg) => {
-              if (this.disposed) return;
-              this.detailsByName.set(pkg.name, {
-                ...pkg,
-                published: pkg.published || row.remote!.published,
+          if (!this.offline || this.cachedDetails?.(row.remote.name))
+            void this.loadDetails(row.remote.name)
+              .then((pkg) => {
+                if (this.disposed) return;
+                this.detailsByName.set(pkg.name, {
+                  ...pkg,
+                  published: pkg.published || row.remote!.published,
+                });
+                this.tui.requestRender();
+              })
+              .catch((error: unknown) => {
+                if (this.disposed) return;
+                this.remoteError =
+                  error instanceof Error ? error.message : String(error);
+                this.tui.requestRender();
               });
-              this.tui.requestRender();
-            })
-            .catch((error: unknown) => {
-              if (this.disposed) return;
-              this.remoteError =
-                error instanceof Error ? error.message : String(error);
-              this.tui.requestRender();
-            });
         }
       }
       this.tui.requestRender();
