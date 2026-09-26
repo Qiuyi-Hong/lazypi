@@ -130,6 +130,32 @@ function preview(
   return { lines, overflow };
 }
 
+function localDetails(
+  entry: PackageEntry,
+  items: PackageEntry[],
+  selections: Selection[],
+): string[] {
+  const peers = items.filter(
+    (item) => identity(item.source) === identity(entry.source),
+  );
+  return [
+    entry.name,
+    `Scope: ${entry.scope} · State: ${entry.state}`,
+    ...(peers.length > 1
+      ? peers.map((item) => `Pi state (${item.scope}): ${item.state}`)
+      : []),
+    `Source: ${entry.source}`,
+    `Description: ${entry.description ?? "not provided locally"}`,
+    `Version: ${entry.version ?? "unknown (local)"}`,
+    `Resources: ${entry.resources.join(", ") || (entry.path && !entry.error ? "none detected" : "unavailable")}`,
+    `Repository: ${entry.repository ?? "not provided locally"}`,
+    `Author: ${entry.author ?? "not provided locally"}`,
+    `Installed path: ${entry.path ?? "missing"}`,
+    `Required by: ${requiredBy(entry.source, selections).join(", ") || "no LazyPi selection"}`,
+    ...(entry.error ? [entry.error] : []),
+  ].map(plain);
+}
+
 export class ManagerPopup implements Component {
   private selected = 0;
   private details = false;
@@ -436,63 +462,75 @@ export class ManagerPopup implements Component {
     const footerRows = height >= 16 ? 2 : 1;
     const bodySize = height - 2 - lines.length - footerRows;
     const body: string[] = [];
+    let detailCount = 0;
     if (this.details && current) {
-      const detail: string[] = [];
       const e = current.entry;
+      const local =
+        (this.section === "Packages" ||
+          this.section === "Enabled" ||
+          this.section === "Disabled") &&
+        e;
+      const detail: string[] = local
+        ? localDetails(e, this.items, this.selections)
+        : [];
       const remote =
+        !local &&
         current.remote &&
         (this.detailsByName.get(current.remote.name) ?? current.remote);
-      detail.push(plain(current.name));
-      if (this.section === "Community") detail.push("unverified");
-      if (!current.extra)
-        detail.push(
-          plain(`Source: ${e?.source ?? current.source ?? ""}`),
-          ...(this.section === "Community"
-            ? [
-                plain(`Scope: ${e?.scope ?? "choose at install"}`),
-                plain(`State: ${e?.state ?? "not installed"}`),
-              ]
-            : [
-                plain(
-                  `Scope: ${e?.scope ?? "choose at install"} · State: ${current.state}`,
-                ),
-              ]),
-          plain(
-            `Version: ${e?.version ?? "unknown"} · Resources: ${e?.resources.join(", ") || "unknown"}`,
-          ),
-          plain(
-            `Repository: ${e?.repository ?? "unknown"} · Author: ${e?.author ?? "unknown"}`,
-          ),
-        );
-      detail.push(plain(current.description));
-      if (current.extra) {
-        const extra = current.extra;
-        detail.push(
-          `Category: ${EXTRA_CATEGORIES[extra.category]} · ${current.state}`,
-          `Resources: ${extra.resourceTypes.join(", ") || "workflow"}`,
-          `Tags: ${extra.tags.join(", ")}`,
-          `Requires: ${extra.requires?.join(", ") || "none"}`,
-          ...this.extraFacts(extra),
-          "Disabling a selection does not uninstall packages.",
-        );
-      } else if (e || current.source) {
-        detail.push(
-          `Required by: ${requiredBy(e?.source ?? current.source!, this.selections).join(", ") || "no LazyPi selection"}`,
-        );
+      if (!local) {
+        detail.push(plain(current.name));
+        if (this.section === "Community") detail.push("unverified");
+        if (!current.extra)
+          detail.push(
+            plain(`Source: ${e?.source ?? current.source ?? ""}`),
+            ...(this.section === "Community"
+              ? [
+                  plain(`Scope: ${e?.scope ?? "choose at install"}`),
+                  plain(`State: ${e?.state ?? "not installed"}`),
+                ]
+              : [
+                  plain(
+                    `Scope: ${e?.scope ?? "choose at install"} · State: ${current.state}`,
+                  ),
+                ]),
+            plain(
+              `Version: ${e?.version ?? "unknown"} · Resources: ${e?.resources.join(", ") || "unknown"}`,
+            ),
+            plain(
+              `Repository: ${e?.repository ?? "unknown"} · Author: ${e?.author ?? "unknown"}`,
+            ),
+          );
+        detail.push(plain(current.description));
+        if (current.extra) {
+          const extra = current.extra;
+          detail.push(
+            `Category: ${EXTRA_CATEGORIES[extra.category]} · ${current.state}`,
+            `Resources: ${extra.resourceTypes.join(", ") || "workflow"}`,
+            `Tags: ${extra.tags.join(", ")}`,
+            `Requires: ${extra.requires?.join(", ") || "none"}`,
+            ...this.extraFacts(extra),
+            "Disabling a selection does not uninstall packages.",
+          );
+        } else if (e || current.source) {
+          detail.push(
+            `Required by: ${requiredBy(e?.source ?? current.source!, this.selections).join(", ") || "no LazyPi selection"}`,
+          );
+        }
+        if (remote)
+          detail.push(
+            this.section === "Community"
+              ? `Latest: ${plain(remote.version)}`
+              : `Community · unverified · latest ${plain(remote.version)}`,
+            `Provides: ${plain(remote.resources.join(", ")) || "unknown (manifest not loaded)"}`,
+            `Repository: ${plain(remote.repository || "unknown")} · Author: ${plain(remote.author || "unknown")}`,
+            `Published: ${plain(remote.published || "unknown")}`,
+            `Dependencies: ${plain(remote.dependencies?.join(", ") || "unknown")}`,
+          );
+        if (e?.error) detail.push(plain(e.error));
       }
-      if (remote)
-        detail.push(
-          this.section === "Community"
-            ? `Latest: ${plain(remote.version)}`
-            : `Community · unverified · latest ${plain(remote.version)}`,
-          `Provides: ${plain(remote.resources.join(", ")) || "unknown (manifest not loaded)"}`,
-          `Repository: ${plain(remote.repository || "unknown")} · Author: ${plain(remote.author || "unknown")}`,
-          `Published: ${plain(remote.published || "unknown")}`,
-          `Dependencies: ${plain(remote.dependencies?.join(", ") || "unknown")}`,
-        );
-      if (e?.error) detail.push(plain(e.error));
       const wrapped = detail.flatMap((text) => wrapTextWithAnsi(text, inner));
-      this.detailLimit = Math.max(0, wrapped.length - bodySize);
+      detailCount = wrapped.length;
+      this.detailLimit = Math.max(0, detailCount - bodySize);
       this.detailOffset = Math.min(this.detailOffset, this.detailLimit);
       body.push(
         ...wrapped.slice(this.detailOffset, this.detailOffset + bodySize),
@@ -703,27 +741,38 @@ export class ManagerPopup implements Component {
           ),
         );
     }
+    const detailPosition = `${this.detailOffset + 1}-${Math.min(detailCount, this.detailOffset + bodySize)}/${detailCount}`;
     const footer = this.details
-      ? `Esc back · ↑↓ scroll ${this.detailOffset + 1}/${this.detailLimit + bodySize}`
+      ? visibleWidth(`Esc back · ↑↓ scroll ${detailPosition} ↓ more`) <= inner
+        ? `Esc back · ↑↓ scroll ${detailPosition} ${this.detailOffset < this.detailLimit ? "↓ more" : "↑ end"}`
+        : `Esc back · ↑↓ ${this.detailOffset + 1}/${this.detailLimit + 1} ${this.detailOffset < this.detailLimit ? "↓" : "end"}`
       : rows.length > 1
         ? footerRows === 1
           ? `Esc close · ↑↓ ${this.selected + 1}/${rows.length}`
           : `Esc close · Tab sections · ↑↓ select · Enter details · ${this.selected + 1}/${rows.length}`
         : "Esc close · Tab sections · Enter details";
     const actions =
-      this.section === "Settings"
-        ? "Space/Enter toggle setting · Esc close"
-        : this.section === "Extras"
-          ? "Enter category/details · f filter type · Space toggle · i install/select · x deselect · Esc back"
-          : this.section === "Community"
-            ? "i install · Enter details · e/d toggle · x remove · r refresh registry · Esc close"
-            : this.section === "Updates"
-              ? "u update · U update all · r refresh registry · Esc close"
-              : "i install · e enable · d disable · Space toggle · x remove · u update · r refresh · Esc close";
+      this.details &&
+      (this.section === "Packages" ||
+        this.section === "Enabled" ||
+        this.section === "Disabled")
+        ? "Esc back · ↑↓ scroll"
+        : this.section === "Settings"
+          ? "Space/Enter toggle setting · Esc close"
+          : this.section === "Extras"
+            ? "Enter category/details · f filter type · Space toggle · i install/select · x deselect · Esc back"
+            : this.section === "Community"
+              ? "i install · Enter details · e/d toggle · x remove · r refresh registry · Esc close"
+              : this.section === "Updates"
+                ? "u update · U update all · r refresh registry · Esc close"
+                : "i install · e enable · d disable · Space toggle · x remove · u update · r refresh · Esc close";
     lines.push(...body.slice(0, bodySize));
     while (lines.length < height - 2 - footerRows) lines.push("");
     const registry =
-      rows.length && (this.remoteError || this.loading)
+      !this.details &&
+      (this.section === "Community" || this.section === "Updates") &&
+      rows.length &&
+      (this.remoteError || this.loading)
         ? this.remoteError
           ? this.theme.fg("error", `Registry: ${plain(this.remoteError)}`)
           : this.theme.fg("muted", "Refreshing npm metadata…")
@@ -792,6 +841,19 @@ export class ManagerPopup implements Component {
           : data === "D"
             ? "Disabled"
             : sections.find((section) => sectionShortcuts[section] === data);
+    if (
+      this.details &&
+      (this.section === "Packages" ||
+        this.section === "Enabled" ||
+        this.section === "Disabled") &&
+      !shortcut &&
+      ![Key.escape, Key.up, Key.down, Key.tab, Key.shift("tab")].some((key) =>
+        matchesKey(data, key),
+      ) &&
+      data !== "j" &&
+      data !== "k"
+    )
+      return;
     if (matchesKey(data, Key.escape)) {
       if (this.details) this.details = false;
       else if (this.section === "Extras" && this.category) {
@@ -885,7 +947,7 @@ export class ManagerPopup implements Component {
       if (this.section === "Extras" && row?.category && !row.extra) {
         this.category = row.category;
         this.selected = 0;
-      } else {
+      } else if (row) {
         this.details = !this.details;
         this.detailOffset = 0;
         if (
