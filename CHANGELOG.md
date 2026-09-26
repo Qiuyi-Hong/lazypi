@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.3 (2026-09-26)
+
+### Added
+
+- Regression coverage for clearing search when switching sections while preserving Extras category navigation.
+
 ## 0.2.2 (2026-09-25)
 
 ### Added

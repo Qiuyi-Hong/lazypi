@@ -1,6 +1,6 @@
 {
   "name": "@qiuyihong/lazypi",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "LazyVim-inspired package manager for Pi",
   "repository": {
     "type": "git",
