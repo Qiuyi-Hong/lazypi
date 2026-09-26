@@ -321,7 +321,7 @@ export class ManagerPopup implements Component {
       `Scope: ${e?.scope ?? "choose at install"}`,
       `State: ${e?.state ?? "not installed"}`,
       ...peers.map((item) => `Pi state (${item.scope}): ${item.state}`),
-      `Version: ${e?.version ?? "unknown"} (Pi installed)`,
+      `Version: ${e?.version ?? "unknown"} (Pi${e?.path ? " installed" : ": not installed"})`,
       `Pi resources: ${e?.path && !e.error ? e.resources.join(", ") || "none detected" : "unknown"}`,
       `Pi description: ${e?.description ?? localAbsent}`,
       `Pi repository: ${e?.repository ?? localAbsent}`,

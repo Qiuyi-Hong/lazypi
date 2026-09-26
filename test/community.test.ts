@@ -571,7 +571,7 @@ test("Community list and details keep Pi state and unverified ahead of registry 
     const text = lines.join("\n");
     assert.match(text, /unverified/);
     assert.match(text, /State: not installed/);
-    assert.match(text, /Version: unknown/);
+    assert.match(text, /Version: unknown \(Pi: not/);
     assert.doesNotMatch(text, /State:.*9{6}/);
     assert.doesNotMatch(text, /Version: 9{6}/);
     assert.doesNotMatch(text, /\u203a/);
