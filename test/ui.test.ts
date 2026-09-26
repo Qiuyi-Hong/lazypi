@@ -961,24 +961,29 @@ test("Extra rows keep selection and Pi state legible at wide and narrow widths",
   for (let n = 0; n < at("research-workflow"); n++) ui.handleInput("j");
   const narrow = ui.render(48);
   fits(narrow, 48);
-  const marked = narrow.find((line) => line.includes("\u203a"));
-  assert.match(marked ?? "", /selected \(user\)/);
-  assert.match(marked ?? "", /partially installed/);
+  const marked = narrow.findIndex((line) => line.includes("\u203a"));
+  assert.match(narrow[marked] ?? "", /research-workflow/);
+  assert.match(
+    narrow[marked + 1] ?? "",
+    /selected \(user\) · partially installed/,
+  );
 
   const wide = ui.render(120);
   fits(wide, 120);
   const wideText = wide.join("\n");
-  assert.match(wideText, /Scope: user/);
-  assert.match(wideText, /disabled \u00b7 user/);
-  assert.match(wideText, /missing \u00b7 project/);
+  assert.match(wideText, /Selection scope: user/);
+  assert.match(wideText, /Pi state: disabled/);
+  assert.match(wideText, /state: missing/);
   assert.doesNotMatch(wideText, /enabled|active/);
   ui.handleInput("\r");
   const details = ui.render(120);
   fits(details, 120);
   const detailText = details.join("\n");
-  assert.match(detailText, /Scope: user/);
-  assert.match(detailText, /disabled \u00b7 user/);
-  assert.match(detailText, /missing \u00b7 project/);
+  assert.match(detailText, /Selection scope: user/);
+  assert.match(detailText, /Package: npm:pi-subagents · installed/);
+  assert.match(detailText, /Pi scope: user · Pi state: disabled/);
+  assert.match(detailText, /Package: npm:pi-web-access · not installed/);
+  assert.match(detailText, /Pi scope: project · Pi state: missing/);
   assert.match(detailText, /does not uninstall/);
   assert.doesNotMatch(detailText, /enabled|active/);
   assert.doesNotMatch(detailText, /\u203a/);
@@ -1002,10 +1007,10 @@ test("Extra rows keep selection and Pi state legible at wide and narrow widths",
     "web-research",
   );
   for (let n = 0; n < at("pi-web-access"); n++) direct.handleInput("j");
-  const access = direct.render(48).find((line) => line.includes("\u203a"));
-  assert.match(access ?? "", /selected \(project\)/);
-  assert.match(access ?? "", /not installed/);
-  assert.doesNotMatch(access ?? "", /required/);
+  const access = direct.render(48).join("\n");
+  assert.match(access, /› pi-web-access/);
+  assert.match(access, /selected \(project\) · not installed/);
+  assert.doesNotMatch(access, /required/);
   direct.handleInput(" ");
   assert.equal(choices.at(-1)?.action, "extra");
   assert.equal(choices.at(-1)?.enabled, false);
@@ -1026,15 +1031,134 @@ test("Extra rows keep selection and Pi state legible at wide and narrow widths",
   for (let n = 0; n < at("pi-web-search"); n++) search.handleInput("j");
   const customWide = search.render(120);
   fits(customWide, 120);
-  assert.match(customWide.join("\n"), /custom \u00b7 user/);
+  assert.match(customWide.join("\n"), /Pi state: custom/);
   assert.doesNotMatch(customWide.join("\n"), /enabled|active/);
   search.handleInput("\r");
-  assert.match(search.render(48).join("\n"), /custom \u00b7 user/);
+  assert.match(
+    search.render(48).join("\n"),
+    /Pi scope: user \u00b7 Pi state: custom/,
+  );
   search.handleInput("\u001b");
   search.handleInput("f");
   assert.equal(search.resourceType, "extension");
   assert.match(search.render(120).join("\n"), /x deselect/);
   assert.doesNotMatch(search.render(48).join("\n"), /uninstall|\bremove\b/);
+});
+
+test("Extra rows preserve names and distinct selection/install status; details show real Pi facts", () => {
+  const terminal = { requestRender: () => {}, terminal: { rows: 18 } } as TUI;
+  const items = [
+    {
+      source: "npm:pi-subagents",
+      scope: "user" as const,
+      state: "disabled" as const,
+      name: "pi-subagents",
+      path: "/installed",
+      resources: [],
+    },
+    {
+      source: "npm:pi-web-access",
+      scope: "project" as const,
+      state: "missing" as const,
+      name: "pi-web-access",
+      resources: [],
+    },
+    {
+      source: "npm:pi-web-search",
+      scope: "user" as const,
+      state: "custom" as const,
+      name: "pi-web-search",
+      path: "/installed",
+      resources: [],
+    },
+  ];
+  const ui = new ManagerPopup(
+    terminal,
+    theme,
+    () => {},
+    items,
+    "Extras",
+    "",
+    [{ id: "research-workflow", scope: "user" }],
+    "web-research",
+  );
+  const web = getExtrasByCategory("web-research");
+  const moveTo = (id: string) => {
+    const index = web.findIndex((extra) => extra.id === id);
+    for (let n = 0; n < index; n++) ui.handleInput("j");
+  };
+  moveTo("research-workflow");
+  const narrow = ui.render(48).join("\n");
+  assert.match(
+    narrow,
+    /› research-workflow\s*│\n│ selected \(user\) · partially installed/,
+  );
+  ui.handleInput("\r");
+  assert.match(ui.render(48).at(-2)!, /Esc back.*↓/);
+  let details = ui.render(120).join("\n");
+  for (let n = 0; n < 20; n++) {
+    ui.handleInput("j");
+    details += "\n" + ui.render(120).join("\n");
+  }
+  assert.match(details, /Suggested resources: workflow/);
+  assert.match(details, /Selection scope: user/);
+  assert.match(details, /Requires: pi-subagents, pi-web-access/);
+  assert.match(details, /Package: npm:pi-subagents · installed/);
+  assert.match(details, /Pi scope: user · Pi state: disabled/);
+  assert.match(details, /Package: npm:pi-web-access · not installed/);
+  assert.match(details, /Pi scope: project · Pi state: missing/);
+  assert.doesNotMatch(details, /Pi state: enabled/);
+  ui.handleInput("\u001b");
+  assert.match(ui.render(48).join("\n"), /› research-workflow/);
+
+  const selectedMissing = new ManagerPopup(
+    terminal,
+    theme,
+    () => {},
+    items,
+    "Extras",
+    "pi-web-access",
+    [{ id: "pi-web-access", scope: "project" }],
+    "web-research",
+  );
+  const unselectedInstalled = new ManagerPopup(
+    terminal,
+    theme,
+    () => {},
+    items,
+    "Extras",
+    "pi-web-search",
+    [],
+    "web-research",
+  );
+  assert.match(
+    selectedMissing.render(48).join("\n"),
+    /selected \(project\) · not installed/,
+  );
+  assert.match(
+    unselectedInstalled.render(48).join("\n"),
+    /available · installed/,
+  );
+
+  const required = new ManagerPopup(
+    terminal,
+    theme,
+    () => {},
+    [],
+    "Extras",
+    "pi-web-access",
+    [{ id: "research-workflow", scope: "user" }],
+    "web-research",
+  );
+  assert.match(required.render(48).join("\n"), /required · not installed/);
+  required.handleInput("\r");
+  let unconfigured = required.render(120).join("\n");
+  required.handleInput("j");
+  unconfigured += "\n" + required.render(120).join("\n");
+  assert.match(unconfigured, /Selection scope: not selected/);
+  assert.match(unconfigured, /Package: npm:pi-web-access · not installed/);
+  assert.match(unconfigured, /Pi scope: none · Pi state: not configured/);
+  assert.doesNotMatch(unconfigured, /Pi state: enabled/);
 });
 
 test("Extras categories, type filters and tag search remain independent", () => {

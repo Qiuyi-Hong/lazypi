@@ -85,16 +85,18 @@ function extraRow(
   const prefix = `${marker} `;
   const status = `  ${state}`;
   const room = width - visibleWidth(prefix) - visibleWidth(status);
-  if (room >= 1)
+  if (room >= visibleWidth(plain(name)))
     return {
       lines: [`${prefix}${truncateToWidth(plain(name), room)}${status}`],
       yieldRest: false,
     };
   const short = state.replace(/ \([^)]*\)/, "");
   const compact =
-    visibleWidth(short) <= width
-      ? short
-      : short.replace("partially installed", "partial install");
+    visibleWidth(state) <= width
+      ? state
+      : visibleWidth(short) <= width
+        ? short
+        : short.replace("partially installed", "partial install");
   return {
     lines: [
       truncateToWidth(`${prefix}${plain(name)}`, width),
@@ -289,19 +291,23 @@ export class ManagerPopup implements Component {
     const direct = this.selections.filter((item) => item.id === extra.id);
     const sources = this.sourcesFor(extra);
     return [
-      `Scope: ${direct.map((item) => item.scope).join(", ") || "not selected"}`,
+      `Selection scope: ${direct.map((item) => item.scope).join(", ") || "not selected"}`,
       ...(sources.length
         ? sources.flatMap((source) => {
             const matches = this.items.filter(
               (item) => identity(item.source) === identity(source),
             );
             return matches.length
-              ? matches.map(
-                  (item) => `${item.state} · ${item.scope} · ${plain(source)}`,
-                )
-              : [`not installed · ${plain(source)}`];
+              ? matches.flatMap((item) => [
+                  `Package: ${plain(source)} · ${item.path ? "installed" : "not installed"}`,
+                  `Pi scope: ${item.scope} · Pi state: ${item.state}`,
+                ])
+              : [
+                  `Package: ${plain(source)} · not installed`,
+                  "Pi scope: none · Pi state: not configured",
+                ];
           })
-        : ["Packages: none"]),
+        : ["Packages: none (dependency workflow)"]),
     ];
   }
 
@@ -551,7 +557,7 @@ export class ManagerPopup implements Component {
           const extra = current.extra;
           detail.push(
             `Category: ${EXTRA_CATEGORIES[extra.category]} · ${current.state}`,
-            `Resources: ${extra.resourceTypes.join(", ") || "workflow"}`,
+            `Suggested resources: ${extra.resourceTypes.join(", ") || "workflow"}`,
             `Tags: ${extra.tags.join(", ")}`,
             `Requires: ${extra.requires?.join(", ") || "none"}`,
             ...this.extraFacts(extra),
@@ -748,7 +754,7 @@ export class ManagerPopup implements Component {
                 current.state,
                 ...this.extraFacts(current.extra),
                 "Disabling a selection does not uninstall packages.",
-              ],
+              ].flatMap((text) => wrapTextWithAnsi(plain(text), pane)),
               overflow: false,
             }
           : preview(current, pane);
