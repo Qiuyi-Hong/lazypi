@@ -337,6 +337,7 @@ test("Packages detail return keeps the same list viewport after resize", () => {
   for (let n = 0; n < 20; n++) ui.handleInput("j");
   ui.handleInput("x");
   assert.deepEqual(choices, []);
+  ui.setRemote([], new Map(), false);
   terminal.terminal.rows = 12;
   ui.render(34);
   terminal.terminal.rows = 20;

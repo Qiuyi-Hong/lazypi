@@ -226,13 +226,21 @@ export class ManagerPopup implements Component {
     error?: string,
   ): void {
     if (this.disposed) return;
-    const selected = this.rows()[this.selected]?.source;
+    const selected = this.rows()[this.selected];
     this.community = community;
     this.versions = versions;
     this.loading = loading;
     this.remoteError = error;
-    const index = this.rows().findIndex((row) => row.source === selected);
-    if (index >= 0) this.selected = index;
+    const rows = this.rows();
+    const index = rows.findIndex((row) =>
+      selected?.entry
+        ? row.entry === selected.entry
+        : selected?.source !== undefined && row.source === selected.source,
+    );
+    this.selected =
+      index >= 0
+        ? index
+        : Math.min(this.selected, Math.max(0, rows.length - 1));
     this.tui.requestRender();
   }
 
