@@ -46,6 +46,16 @@ test("popup renders within narrow terminal widths and supports section navigatio
   );
 });
 
+test("switching sections clears the visible search without changing Extras category navigation", () => {
+  const ui = new ManagerPopup(tui, theme, () => {}, [], "Extras", "yagni");
+  assert.match(ui.render(76).join("\n"), /Search: yagni/);
+  ui.handleInput("P");
+  assert.match(ui.render(76).join("\n"), /Search: \(press \/\)/);
+  ui.handleInput("X");
+  assert.match(ui.render(76).join("\n"), /AI & Agents/);
+  assert.doesNotMatch(ui.render(76).join("\n"), /Search: yagni/);
+});
+
 test("uppercase keys jump to every section without replacing existing actions", () => {
   const choices: Choice[] = [];
   const ui = new ManagerPopup(
