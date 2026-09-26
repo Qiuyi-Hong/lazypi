@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LazyPi · terminal hierarchy comparison (throwaway prototype)</title>
+<style>
+  :root { color-scheme: dark; font-family: system-ui, sans-serif; background: #10181d; color: #e8eff0; }
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  header, main { max-width: 1320px; margin: auto; padding: 24px clamp(16px, 4vw, 56px); }
+  header { border-bottom: 1px solid #34434b; }
+  h1 { font-size: clamp(1.55rem, 3vw, 2.45rem); letter-spacing: -.04em; margin: 0 0 8px; }
+  p { color: #b7c9cb; max-width: 72ch; line-height: 1.55; margin: 8px 0; }
+  .eyebrow { font-size: .75rem; color: #9de4c8; letter-spacing: .14em; text-transform: uppercase; font-weight: 700; }
+  .controls { display: flex; gap: 20px 32px; flex-wrap: wrap; margin: 0 0 24px; }
+  fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+  legend { font-size: .83rem; color: #b7c9cb; margin: 0 0 9px; font-weight: 600; }
+  .options { display: flex; flex-wrap: wrap; gap: 6px; }
+  button { font: inherit; cursor: pointer; border: 1px solid #52636a; border-radius: 5px; background: #18252a; color: #e8eff0; padding: 7px 11px; }
+  button:hover { background: #293b42; }
+  button[aria-pressed="true"] { background: #246b59; border-color: #a1e9c9; color: white; }
+  button:focus-visible { outline: 2px solid #a1e9c9; outline-offset: 3px; }
+  .secondary { margin-top: 16px; }
+  .stage { overflow-x: auto; background: #182329; border: 1px solid #35434b; border-radius: 8px; padding: 20px; }
+  .terminal { --bg: #11191d; --text: #e5e9e6; --dim: #aabbb8; --accent: #8bd9b5; --success: #8bd9b5; --warning: #edcb86; --error: #fa9794; --border: #798d90; --selected: #304d4d; color: var(--text); background: var(--bg); width: max-content; min-width: calc(var(--cols) * 1ch); height: calc(var(--rows) * 1.5em + 28px); padding: 14px 1ch; font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-variant-ligatures: none; border-radius: 4px; margin: auto; box-shadow: 0 8px 24px #0006; }
+  .terminal.light { --bg: #f6f8f5; --text: #1d3031; --dim: #526468; --accent: #165d48; --success: #176341; --warning: #795419; --error: #a32a29; --border: #53686b; --selected: #cce6db; }
+  .line { white-space: pre; height: 1.5em; }
+  .border { color: var(--border); }
+  .brand, .heading { color: var(--accent); font-weight: 700; }
+  .muted, .footer { color: var(--dim); }
+  .selected { background: var(--selected); }
+  .good { color: var(--success); }
+  .warn { color: var(--warning); }
+  .bad { color: var(--error); }
+  .accent { color: var(--accent); }
+  .line .good { color: var(--success); }
+  .line .warn { color: var(--warning); }
+  .line .bad { color: var(--error); }
+  .line .muted-word { color: var(--dim); }
+  .note { font-size: .85rem; margin-top: 16px; }
+  .comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 26px; }
+  .comparison section { border-top: 1px solid #45595e; padding-top: 12px; }
+  .comparison h2 { font-size: 1.05rem; margin: 0 0 8px; }
+  .comparison p { font-size: .9rem; }
+  @media (max-width: 700px) { .comparison { grid-template-columns: 1fr; } .stage { padding: 12px; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="eyebrow">Throwaway design comparison · not production UI</div>
+  <h1>LazyPi in the terminal</h1>
+  <p>Compare two hierarchies under the same frame, content, and Pi-derived state rules. <strong>Recommended: A · grouped top navigation.</strong> It keeps the six views visible until space is genuinely tight, without taking columns from package status and detail.</p>
+</header>
+<main>
+  <div class="controls" id="controls"></div>
+  <div class="stage"><div id="terminal" class="terminal" role="img" aria-label="LazyPi terminal mockup"></div></div>
+  <p class="note" id="caption"></p>
+  <div class="comparison">
+    <section><h2>A · grouped top navigation <span class="eyebrow">Recommended</span></h2><p>Sections stay legible above the working area. Enabled and Disabled are Packages filters, not separate destinations. At 48×12, replace the section strip with a compact Tab cue to give the list room.</p></section>
+    <section><h2>B · contextual section rail</h2><p>At wide sizes, sections live in a left rail while search and status filters sit with the list. The rail vanishes at smaller sizes, trading always-visible navigation for more content.</p></section>
+  </div>
+  <p class="note">This simulates character and row budgets; color roles approximate Pi dark/light themes, not their exact palettes. Example package names and versions are illustrative. The final Pi renderer must use the active theme and measured terminal column widths. No installation or settings action runs here.</p>
+</main>
+<script>
+// Prototype question: grouped strip or section rail for a stable, padded Pi overlay?
+const sizes = { wide: [122, 30], medium: [80, 24], short: [48, 12], tiny: [32, 8] };
+const views = ["Packages", "Core", "Extras", "Community", "Updates", "Settings"];
+const examples = {
+  Packages: [
+    ["pi-subagents", "enabled · user", "success"],
+    ["pi-web-access", "missing · project", "error"],
+    ["my-tools", "custom · user", "warning"],
+    ["pi-mcp-adapter", "disabled · user", "muted"],
+    ["local-helper", "shadowed · user", "warning"],
+  ],
+  Core: [
+    ["pi-mcp-adapter", "enabled · user", "success"],
+    ["pi-subagents", "disabled · user", "muted"],
+    ["pi-web-access", "not installed", "muted"],
+  ],
+  Extras: [
+    ["Research Workflow", "selected · not installed", "warning"],
+    ["ponytail", "available · installed", "success"],
+    ["some-workflow", "required · partially installed", "warning"],
+  ],
+  Community: [
+    ["pi-a11y", "unverified · not installed", "muted"],
+    ["pi-review", "unverified · enabled · user", "success"],
+    ["pi-palette", "unverified · not installed", "muted"],
+  ],
+  Updates: [
+    ["pi-subagents", "1.2.0 -> 1.3.0", "accent"],
+    ["pi-mcp-adapter", "2.1.0 -> 2.2.0", "accent"],
+  ],
+  Settings: [["Auto-check updates at startup", "off", "muted"]],
+};
+const detail = {
+  Packages: ["pi-subagents", "Pi state: enabled · user", "Installed: 1.2.0", "Source: npm:pi-subagents", "Resources: extensions, skills", "Required by: Research Workflow", "npm latest: not loaded", "Enter: full details"],
+  Core: ["Pi MCP Adapter", "Core · independently installable", "Pi state: enabled · user", "Installed: 2.1.0", "Source: npm:pi-mcp-adapter", "Enter: full details"],
+  Extras: ["Research Workflow", "Selection: selected · user", "Installation: not installed", "Packages: Subagents, Web Access", "Requires: Web & Research", "Selection ≠ Pi package state", "Enter: full details"],
+  Community: ["pi-a11y · unverified", "Registry listing; not installed", "npm latest: not loaded", "Declared types: unknown", "No Pi scope until installation", "Enter: full details"],
+  Updates: ["pi-subagents", "Installed: 1.2.0 · user", "npm latest: 1.3.0 (cached)", "Pi state: enabled", "U: update eligible packages", "Enter: full details"],
+  Settings: ["Auto-check updates at startup", "Off · local preference", "Checks npm asynchronously", "No package state changes", "Space/Enter: toggle"],
+};
+const expanded = {
+  Packages: ["pi-subagents", "LOCAL · Pi settings / installed files", "State: enabled · user", "Source: npm:pi-subagents", "Installed version: 1.2.0", "Resources: extensions, skills", "Repository: not provided", "Author: unknown", "Required by: Research Workflow", "NPM · not loaded", "Latest version: not loaded"],
+  Core: ["Pi MCP Adapter · Core", "Catalog: baseline package", "Pi state: enabled · user", "Source: npm:pi-mcp-adapter", "Installed version: 2.1.0", "Resources: extensions", "Required by: no LazyPi selection"],
+  Extras: ["Research Workflow · Extra", "Category: Web & Research", "Selection: selected · user", "Installation: not installed", "Packages: pi-subagents · missing", "          pi-web-access · missing", "Resources: extensions, skills", "Tags: research", "Selection never enables a Pi package"],
+  Community: ["pi-a11y · unverified", "REGISTRY · publisher-provided", "Latest version: not loaded", "Declared Pi types: unknown", "Author: unknown", "Repository: unknown", "LOCAL · Pi settings", "Not installed · no scope", "Offline without cache: not available"],
+  Updates: ["pi-subagents", "LOCAL · Pi settings", "Installed: 1.2.0 · user · enabled", "REGISTRY · cached hint", "Latest: 1.3.0", "Cache time: unknown", "Source: npm:pi-subagents", "Update uses native Pi package manager"],
+  Settings: ["Auto-check updates at startup", "Preference: off", "Checks npm asynchronously", "Only notifies about eligible updates", "Community remains visible", "Does not change package installation"],
+};
+const state = {
+  variant: new URLSearchParams(location.search).get("variant") === "B" ? "B" : "A",
+  size: sizes[new URLSearchParams(location.search).get("size")] ? new URLSearchParams(location.search).get("size") : "wide",
+  view: views.includes(new URLSearchParams(location.search).get("view")) ? new URLSearchParams(location.search).get("view") : "Packages",
+  theme: new URLSearchParams(location.search).get("theme") === "light" ? "light" : "dark",
+  details: false,
+};
+function cut(s, n) { return n <= 0 ? "" : s.length <= n ? s : s.slice(0, Math.max(0, n - 1)) + "…"; }
+function pad(s, n) { return cut(s, n).padEnd(n, " "); }
+function contentLine(text, width) { return "│" + "  " + pad(text, width - 6) + "  " + "│"; }
+function tableRow(row, width, selected) {
+  const [name, status] = row;
+  const available = Math.max(2, width - 5);
+  if (status.length + 3 >= available) return `${selected ? "›" : " "} ${cut(name, available)}`;
+  return `${selected ? "›" : " "} ${pad(name, available - status.length - 2)} ${status}`;
+}
+function compose() {
+  const [cols, rows] = sizes[state.size];
+  const width = Math.min(120, cols - 2);
+  const height = Math.min(26, rows - 2);
+  const inside = width - 6;
+  const rail = state.variant === "B" && width >= 100 && !state.details;
+  const panes = !state.details && state.view !== "Settings" && inside - (rail ? 17 : 0) >= 58 && height >= 14;
+  const lines = [];
+  const title = state.variant === "A" ? `LazyPi / ${state.view}` : rail ? "LazyPi" : `${state.view} · LazyPi`;
+  lines.push({ text: "╭─ " + title + " " + "─".repeat(Math.max(0, width - title.length - 6)) + "─╮", kind: "border" });
+  const put = (text, kind = "") => lines.push({ text: contentLine(text, width), kind });
+  if (height < 6 || width < 26) {
+    put("Resize terminal to view LazyPi", "heading");
+    while (lines.length < height - 2) put("");
+    put("Esc close", "footer");
+  } else {
+    if (height > 7) {
+      if (state.variant === "A") {
+        put(width >= 72 ? views.map(v => v === state.view ? `[${v}]` : v).join("   ") : "Tab sections · / search", "heading");
+        if (height >= 14) put(state.view === "Packages" ? "Search: /     All · Enabled · Disabled" : state.view === "Extras" ? "Extras / Web & Research     Type: All" : state.view === "Community" ? "Search: /     Registry results · unverified" : state.view === "Updates" ? "Registry latest · cached hints" : state.view === "Settings" ? "Local preferences" : "Core · independent packages", "muted");
+      } else {
+        put(rail ? "  SECTIONS  │ Search: /     All · Enabled · Disabled" : state.view === "Packages" ? "Search: /    All · Enabled · Disabled" : "Tab sections · / search", "heading");
+        if (height >= 14) put(rail ? "  Packages  │" : `${state.view} · ${state.view === "Community" ? "registry · unverified" : "Pi / LazyPi facts"}`, "muted");
+      }
+    }
+    const footCount = height >= 14 ? 2 : 1;
+    const available = height - 1 - footCount - lines.length;
+    if (available <= 0) put("Resize terminal for content", "bad");
+    else if (state.details) {
+      const facts = expanded[state.view];
+      const header = `FULL DETAILS · ${state.view}`;
+      for (let i = 0; i < available; i++) {
+        const text = i === 0 ? header : facts[i - 1] ?? "";
+        put(text, i === 0 ? "heading" : text.startsWith("REGISTRY") || text.startsWith("LOCAL") ? "muted" : "");
+      }
+    } else if (rail) {
+      const listWidth = panes ? 34 : inside - 17;
+      const paneWidth = inside - 17 - listWidth - (panes ? 3 : 0);
+      for (let i = 0; i < available; i++) {
+        const nav = i > 0 && i <= views.length ? `${state.view === views[i - 1] ? "›" : " "} ${views[i - 1]}` : "";
+        const left = i === 0 ? `${state.view.toUpperCase()} (${examples[state.view].length})` : examples[state.view][i - 1] ? tableRow(examples[state.view][i - 1], listWidth, i === 1) : "";
+        const right = panes ? (detail[state.view][i] ?? "") : "";
+        put(pad(nav, 13) + " │ " + pad(left, listWidth) + (panes ? " │ " + pad(right, paneWidth) : ""), i === 1 ? "selected" : i === 0 ? "heading" : "");
+      }
+    } else if (panes) {
+      const leftWidth = Math.max(30, Math.floor((inside - 3) * .53));
+      const rightWidth = inside - 3 - leftWidth;
+      for (let i = 0; i < available; i++) {
+        const left = i === 0 ? `${state.view.toUpperCase()} (${examples[state.view].length})` : examples[state.view][i - 1] ? tableRow(examples[state.view][i - 1], leftWidth, i === 1) : "";
+        const right = detail[state.view][i] ?? "";
+        put(pad(left, leftWidth) + " │ " + pad(right, rightWidth), i === 1 ? "selected" : i === 0 ? "heading" : "");
+      }
+    } else {
+      const rows = examples[state.view];
+      const listing = available >= 5 ? [[`${state.view.toUpperCase()} (${rows.length})`, "heading"]] : [];
+      for (const [i, row] of rows.entries()) {
+        const [name, status] = row;
+        if ((state.view === "Extras" || state.view === "Community") && name.length + status.length + 5 > inside) {
+          listing.push([`${i === 0 ? "›" : " "} ${name}`, i === 0 ? "selected" : ""]);
+          listing.push([`  ${status}`, "muted"]);
+        } else listing.push([tableRow(row, inside, i === 0), i === 0 ? "selected" : ""]);
+      }
+      for (let i = 0; i < available; i++) put(listing[i]?.[0] ?? "", listing[i]?.[1] ?? "");
+    }
+    if (height >= 14) put(state.details ? "↑↓ scroll · Esc list · Tab sections" : "Tab sections · / search · ↑↓ select", "footer");
+    put(state.details ? "1/11 · ↓ more · Esc list / close" : state.view === "Settings" ? "Space/Enter toggle · Esc close" : `1/${examples[state.view].length} · Enter details · Esc close`, "footer");
+  }
+  lines.push({ text: "╰" + "─".repeat(width - 2) + "╯", kind: "border" });
+  return { lines, width, height, cols, rows, panes, rail };
+}
+const controls = document.getElementById("controls");
+for (const [label, key, choices] of [
+  ["Candidate", "variant", [["A", "A · top navigation"], ["B", "B · section rail"]]],
+  ["Terminal", "size", [["wide", "122×30"], ["medium", "80×24"], ["short", "48×12"], ["tiny", "32×8"]]],
+  ["View", "view", views.map(v => [v, v])],
+  ["Theme preview", "theme", [["dark", "Dark"], ["light", "Light"]]],
+  ["Depth", "details", [["false", "List / inspector"], ["true", "Full details"]]],
+]) {
+  const field = document.createElement("fieldset");
+  const legend = document.createElement("legend"); legend.textContent = label; field.append(legend);
+  const options = document.createElement("div"); options.className = "options";
+  for (const [value, text] of choices) {
+    const button = document.createElement("button"); button.type = "button"; button.textContent = text; button.dataset.key = key; button.dataset.value = value;
+    button.onclick = () => { state[key] = key === "details" ? value === "true" : value; render(); };
+    options.append(button);
+  }
+  field.append(options); controls.append(field);
+}
+function render() {
+  const data = compose();
+  const terminal = document.getElementById("terminal");
+  terminal.style.setProperty("--cols", data.cols);
+  terminal.style.setProperty("--rows", data.rows);
+  terminal.classList.toggle("light", state.theme === "light");
+  terminal.replaceChildren();
+  for (const line of data.lines) {
+    const div = document.createElement("div"); div.className = `line ${line.kind}`;
+    // Keep content as text, not HTML. The colours are a preview of Pi semantic roles.
+    const status = /\b(enabled|installed|missing|custom|shadowed|disabled|not installed|unverified|unknown|not loaded|partially installed)\b/g;
+    let last = 0;
+    for (const match of line.text.matchAll(status)) {
+      div.append(document.createTextNode(line.text.slice(last, match.index)));
+      const span = document.createElement("span");
+      span.textContent = match[0];
+      span.className = match[0] === "enabled" || match[0] === "installed" ? "good" : match[0] === "missing" ? "bad" : match[0] === "custom" || match[0] === "shadowed" || match[0] === "partially installed" ? "warn" : "muted-word";
+      div.append(span);
+      last = match.index + match[0].length;
+    }
+    div.append(document.createTextNode(line.text.slice(last)));
+    terminal.append(div);
+  }
+  terminal.setAttribute("aria-label", `${state.variant} ${state.view}, ${data.cols} by ${data.rows} terminal, ${data.width} by ${data.height} popup. ${data.lines.map(l => l.text.trim()).filter(Boolean).join(". ")}`);
+  document.getElementById("caption").textContent = `${data.cols}×${data.rows} terminal → ${data.width}×${data.height} frame · ${data.panes ? "two panes" : state.details ? "scrollable full detail" : "full-width list"}${data.rail ? " + section rail" : ""}. Empty rows intentionally remain in the frame. Use the controls to compare identical content in both candidates.`;
+  for (const button of controls.querySelectorAll("button")) button.setAttribute("aria-pressed", String(state[button.dataset.key] === (button.dataset.key === "details" ? button.dataset.value === "true" : button.dataset.value)));
+  const params = new URLSearchParams({ variant: state.variant, size: state.size, view: state.view, theme: state.theme });
+  history.replaceState(null, "", `?${params}`);
+}
+document.addEventListener("keydown", event => {
+  if (["INPUT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
+  if (event.key === "ArrowLeft" || event.key === "ArrowRight") { state.variant = state.variant === "A" ? "B" : "A"; render(); }
+});
+render();
+</script>
+</body>
+</html>
