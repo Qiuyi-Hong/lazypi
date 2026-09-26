@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.4 (2026-09-27)
+
+### Added
+
+- Scrollable package details and clearer Core, Extras, Community, and Updates views that distinguish installed Pi packages from npm registry hints.
+- Provenance and cache status in Community details, with clearer navigation and preview cues throughout the popup.
+
+### Fixed
+
+- Preserve the selected package during asynchronous metadata refresh and keep registry errors visible.
+- Retain native Core shortcuts in details and cached Community update versions.
+
 ## 0.2.3 (2026-09-26)
 
 ### Added
