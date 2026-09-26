@@ -494,7 +494,10 @@ test("Community popup shows unverified state, fetches manifest on demand and off
     "all",
     { versions: new Map([["npm:example", remote]]) },
   );
-  assert.match(updates.render(76).join("\n"), /1.0.0 → 2.0.0/);
+  assert.match(
+    updates.render(76).join("\n"),
+    /Pi installed 1.0.0.*npm latest 2.0.0/s,
+  );
   updates.handleInput("u");
   assert.equal(choices.at(-1)?.entry?.state, "disabled");
 });
