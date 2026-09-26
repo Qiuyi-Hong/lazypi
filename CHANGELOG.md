@@ -14,6 +14,8 @@
 ### Fixed
 
 - Settings toggles update in place without closing and reopening the popup.
+- Section tabs stay visible on one line in the popup.
+- Search resets when switching sections, including after the popup reopens.
 
 ## 0.2.1 (2026-09-24)
 
