@@ -103,22 +103,31 @@ function extraRow(
   };
 }
 
-function preview(row: Row): string[] {
+function preview(
+  row: Row,
+  width: number,
+): { lines: string[]; overflow: boolean } {
   const entry = row.entry;
-  const lines = [
-    plain(row.name),
-    `Source: ${plain(entry?.source ?? row.source ?? "")}`,
-    `Scope: ${plain(entry?.scope ?? "")}`,
-    `State: ${plain(row.state)}`,
-  ];
-  if (entry?.version) lines.push(`Version: ${plain(entry.version)}`);
-  if (entry?.resources.length)
-    lines.push(`Resources: ${plain(entry.resources.join(", "))}`);
-  if (entry?.description) lines.push(plain(entry.description));
-  if (entry?.repository) lines.push(`Repository: ${plain(entry.repository)}`);
-  if (entry?.author) lines.push(`Author: ${plain(entry.author)}`);
-  if (entry?.error) lines.push(plain(entry.error));
-  return lines;
+  const lines: string[] = [];
+  let overflow = false;
+  const add = (text: string, limit = 1) => {
+    const wrapped = wrapTextWithAnsi(plain(text), width);
+    lines.push(...wrapped.slice(0, limit));
+    if (wrapped.length > limit) overflow = true;
+  };
+  add(row.name);
+  if (entry?.description) add(entry.description, 2);
+  const source = plain(`Source: ${entry?.source ?? row.source ?? ""}`);
+  lines.push(truncateToWidth(source, width, "…"));
+  if (visibleWidth(source) > width) overflow = true;
+  add(`Scope: ${entry?.scope ?? ""}`);
+  add(`State: ${row.state}`);
+  if (entry?.version) add(`Version: ${entry.version}`);
+  if (entry?.resources.length) add(`Resources: ${entry.resources.join(", ")}`);
+  if (entry?.repository) add(`Repository: ${entry.repository}`);
+  if (entry?.author) add(`Author: ${entry.author}`);
+  if (entry?.error) add(entry.error);
+  return { lines, overflow };
 }
 
 export class ManagerPopup implements Component {
@@ -501,7 +510,7 @@ export class ManagerPopup implements Component {
         this.section === "Packages" ||
         this.section === "Enabled" ||
         this.section === "Disabled";
-      const visible =
+      let visible =
         packageRows || this.section === "Settings"
           ? Math.max(1, bodySize - 1)
           : Math.max(
@@ -529,6 +538,15 @@ export class ManagerPopup implements Component {
         );
       const pane = roomy ? paneWidth : 0;
       const listWidth = roomy ? inner - gutter.length - pane : 0;
+      const splitSelected =
+        packageRows &&
+        !roomy &&
+        !!current?.entry &&
+        visibleWidth(plain(current.name)) >
+          inner -
+            2 -
+            visibleWidth(`  ${current.state} · ${current.entry.scope}`);
+      if (splitSelected) visible = Math.max(1, bodySize - 2);
       const start = Math.max(
         0,
         Math.min(
@@ -555,13 +573,23 @@ export class ManagerPopup implements Component {
           );
         if (packageRows) {
           const status = `  ${item.state} · ${item.entry!.scope}`;
-          const name = truncateToWidth(
-            plain(item.name),
-            Math.max(1, (roomy ? listWidth : inner) - 2 - visibleWidth(status)),
-          );
-          const row = `${selected ? "›" : " "} ${name}${status}`;
-          if (roomy) listLines.push(row);
-          else body.push(this.focus(line(row), selected, item.state));
+          if (splitSelected && selected) {
+            body.push(
+              this.focus(line(`› ${plain(item.name)}`), true, item.state),
+            );
+            body.push(this.focus(line(status), true, item.state));
+          } else {
+            const name = truncateToWidth(
+              plain(item.name),
+              Math.max(
+                1,
+                (roomy ? listWidth : inner) - 2 - visibleWidth(status),
+              ),
+            );
+            const row = `${selected ? "›" : " "} ${name}${status}`;
+            if (roomy) listLines.push(row);
+            else body.push(this.focus(line(row), selected, item.state));
+          }
         } else if (item.extra) {
           const fitted = extraRow(
             item.name,
@@ -629,18 +657,26 @@ export class ManagerPopup implements Component {
         }
       }
       if (roomy && current) {
-        const side = current.extra
-          ? [
-              plain(current.name),
-              current.state,
-              ...this.extraFacts(current.extra),
-              "Disabling a selection does not uninstall packages.",
-            ]
-          : preview(current);
+        const previewData = current.extra
+          ? {
+              lines: [
+                plain(current.name),
+                current.state,
+                ...this.extraFacts(current.extra),
+                "Disabling a selection does not uninstall packages.",
+              ],
+              overflow: false,
+            }
+          : preview(current, pane);
+        const side = previewData.lines;
         const count = Math.min(
-          bodySize - 1,
-          Math.max(listLines.length, side.length),
+          bodySize - (rows.length > visible ? 1 : 0),
+          Math.max(
+            listLines.length,
+            side.length + (previewData.overflow ? 1 : 0),
+          ),
         );
+        const more = previewData.overflow || side.length > count;
         for (let i = 0; i < count; i++)
           body.push(
             this.focus(
@@ -649,10 +685,15 @@ export class ManagerPopup implements Component {
               rows[start + i]?.state ?? "",
             ) +
               gutter +
-              truncateToWidth(side[i] ?? "", pane, "", true),
+              truncateToWidth(
+                more && i === count - 1
+                  ? this.theme.fg("muted", "Enter details for more ↓")
+                  : (side[i] ?? ""),
+                pane,
+                "",
+                true,
+              ),
           );
-        if (side.length > count)
-          body.push(this.theme.fg("muted", line("Enter details for more ↓")));
       }
       if (rows.length > visible)
         body.push(
@@ -847,7 +888,12 @@ export class ManagerPopup implements Component {
       } else {
         this.details = !this.details;
         this.detailOffset = 0;
-        if (this.details && row?.remote && this.loadDetails) {
+        if (
+          this.details &&
+          (this.section === "Community" || this.section === "Updates") &&
+          row?.remote &&
+          this.loadDetails
+        ) {
           void this.loadDetails(row.remote.name)
             .then((pkg) => {
               if (this.disposed) return;

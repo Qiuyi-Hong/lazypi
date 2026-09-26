@@ -726,6 +726,136 @@ test("Extras categories, type filters and tag search remain independent", () => 
   );
 });
 
+test("Packages preview keeps local facts and both navigation cues when text overflows", () => {
+  const entries = Array.from({ length: 35 }, (_, n) => ({
+    source: n === 34 ? `./${"nested/".repeat(25)}包-package` : `npm:item-${n}`,
+    name: n === 34 ? "包-package" : `item-${n}`,
+    scope: n === 34 ? ("project" as const) : ("user" as const),
+    state: n === 34 ? ("disabled" as const) : ("enabled" as const),
+    path: n === 34 ? "/installed/包-package" : undefined,
+    description: n === 34 ? "local description ".repeat(40) : undefined,
+    version: n === 34 ? "1.2.3" : undefined,
+    resources: n === 34 ? ["skills", "extensions"] : [],
+  }));
+  const terminal = { requestRender: () => {}, terminal: { rows: 20 } };
+  const ui = new ManagerPopup(
+    terminal as TUI,
+    theme,
+    () => {},
+    entries,
+    "Packages",
+  );
+  for (let n = 0; n < 34; n++) ui.handleInput("j");
+  const wide = ui.render(120);
+  assert.equal(wide.length, 18);
+  for (const row of wide) assert.equal(visibleWidth(row), 120);
+  const text = wide.join("\n");
+  assert.match(text, /› 包-package\s+disabled · project/);
+  assert.match(text, /local description/);
+  assert.match(text, /Source: \.\/nested/);
+  assert.match(text, /Scope: project/);
+  assert.match(text, /State: disabled/);
+  assert.match(text, /Version: 1\.2\.3/);
+  assert.match(text, /Resources: skills, extensions/);
+  assert.match(text, /Enter details for more/);
+  assert.match(text, /35\/35 · ↑↓ more/);
+  ui.handleInput("\r");
+  assert.match(ui.render(120).join("\n"), /nested\/nested/);
+  ui.handleInput("\u001b");
+  const narrowFrame = ui.render(32);
+  for (const row of narrowFrame) assert.equal(visibleWidth(row), 32);
+  const narrow = narrowFrame.join("\n");
+  assert.doesNotMatch(narrow, /Source:/);
+  assert.match(narrow, /› 包-package/);
+  assert.match(narrow, /disabled · project/);
+  assert.match(narrow, /35\/35/);
+  terminal.terminal.rows = 12;
+  const short = ui.render(120).join("\n");
+  assert.doesNotMatch(short, /Source:/);
+  assert.match(short, /› 包-package.*disabled · project/);
+  assert.match(short, /35\/35/);
+  terminal.terminal.rows = 8;
+  const tinyFrame = ui.render(30);
+  for (const row of tinyFrame) assert.equal(visibleWidth(row), 30);
+  const tiny = tinyFrame.join("\n");
+  assert.match(tiny, /› 包-package/);
+  assert.match(tiny, /disabled · project/);
+  assert.match(tiny, /35\/35/);
+});
+
+test("Packages browsing and local details never request registry metadata", () => {
+  const choices: Choice[] = [];
+  let requests = 0;
+  const entries = [
+    {
+      source: "npm:x",
+      name: "x",
+      scope: "user" as const,
+      state: "shadowed" as const,
+      resources: [],
+    },
+    {
+      source: "npm:x",
+      name: "x",
+      scope: "project" as const,
+      state: "disabled" as const,
+      resources: ["skills"],
+    },
+    {
+      source: "./missing",
+      name: "missing",
+      scope: "project" as const,
+      state: "missing" as const,
+      resources: [],
+    },
+  ];
+  const ui = new ManagerPopup(
+    tui,
+    theme,
+    (choice) => choices.push(choice),
+    entries,
+    "Packages",
+    "",
+    [],
+    undefined,
+    "all",
+    {
+      versions: new Map([
+        [
+          "npm:x",
+          {
+            source: "npm:x",
+            name: "x",
+            version: "2.0.0",
+            description: "cached",
+            resources: [],
+          },
+        ],
+      ]),
+      loadDetails: async () => {
+        requests++;
+        throw new Error("Unexpected registry request");
+      },
+    },
+  );
+  ui.render(120);
+  ui.handleInput("\r"); // Even with a cached update, local details stay offline.
+  assert.equal(requests, 0);
+  ui.handleInput("\u001b");
+  ui.handleInput("j");
+  ui.render(120);
+  ui.handleInput("\r");
+  ui.render(120);
+  ui.handleInput("\u001b");
+  ui.handleInput("j");
+  ui.render(120);
+  ui.handleInput("\r");
+  assert.equal(requests, 0);
+  ui.handleInput("\u001b");
+  ui.handleInput("x");
+  assert.deepEqual(choices.at(-1), { action: "remove", entry: entries[2] });
+});
+
 test("Packages inspector follows selection only when the frame can hold it", () => {
   const choices: Choice[] = [];
   const noisy = "\u001b[2J";
