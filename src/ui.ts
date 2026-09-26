@@ -8,7 +8,7 @@ import {
   type Component,
   type TUI,
 } from "@earendil-works/pi-tui";
-import { core } from "./catalog.ts";
+import { core, type PackageSpec } from "./catalog.ts";
 import { isCurated, updateFor, type RemotePackage } from "./community.ts";
 import {
   EXTRA_CATEGORIES,
@@ -71,6 +71,7 @@ type Row = {
   category?: ExtraCategory;
   metadata?: string;
   remote?: RemotePackage;
+  core?: PackageSpec;
 };
 
 const plain = (value: string) => value.replace(/[\x00-\x1f\x7f-\x9f]/g, " ");
@@ -154,6 +155,37 @@ function localDetails(
     `Required by: ${requiredBy(entry.source, selections).join(", ") || "no LazyPi selection"}`,
     ...(entry.error ? [entry.error] : []),
   ].map(plain);
+}
+
+function coreDetails(spec: PackageSpec, items: PackageEntry[]): string[] {
+  const matches = items.filter(
+    (item) => identity(item.source) === identity(spec.source),
+  );
+  const detail = [
+    spec.name,
+    `Category: ${spec.category}`,
+    `Description: ${spec.description}`,
+  ];
+  if (!matches.length) detail.push("Pi: not installed (no declaration)");
+  for (const entry of matches) {
+    detail.push(
+      `Scope: ${entry.scope} · State: ${entry.state}`,
+      `Source: ${entry.source}`,
+      `Installed path: ${entry.path ?? "missing"}`,
+    );
+    if (!entry.path) continue;
+    if (entry.version) detail.push(`Version: ${entry.version}`);
+    if (entry.description)
+      detail.push(`Local description: ${entry.description}`);
+    if (!entry.error)
+      detail.push(
+        `Resources: ${entry.resources.join(", ") || "none detected"}`,
+      );
+    if (entry.repository) detail.push(`Repository: ${entry.repository}`);
+    if (entry.author) detail.push(`Author: ${entry.author}`);
+    if (entry.error) detail.push(entry.error);
+  }
+  return detail.map(plain);
 }
 
 export class ManagerPopup implements Component {
@@ -376,15 +408,19 @@ export class ManagerPopup implements Component {
                   }))
               : this.section === "Core"
                 ? core.map((spec) => {
-                    const entry = this.items.find(
+                    const matches = this.items.filter(
                       (item) => identity(item.source) === identity(spec.source),
                     );
+                    const entry =
+                      matches.find((item) => item.scope === "project") ??
+                      matches[0];
                     return {
                       name: spec.name,
                       description: `${spec.category} · ${spec.description}`,
                       state: entry?.state ?? "not installed",
                       entry,
                       source: spec.source,
+                      core: spec,
                     };
                   })
                 : this.items
@@ -478,14 +514,16 @@ export class ManagerPopup implements Component {
           this.section === "Enabled" ||
           this.section === "Disabled") &&
         e;
-      const detail: string[] = local
-        ? localDetails(e, this.items, this.selections)
-        : [];
+      const detail: string[] = current.core
+        ? coreDetails(current.core, this.items)
+        : local
+          ? localDetails(e, this.items, this.selections)
+          : [];
       const remote =
         !local &&
         current.remote &&
         (this.detailsByName.get(current.remote.name) ?? current.remote);
-      if (!local) {
+      if (!local && !current.core) {
         detail.push(plain(current.name));
         if (this.section === "Community") detail.push("unverified");
         if (!current.extra)
@@ -763,7 +801,8 @@ export class ManagerPopup implements Component {
       this.details &&
       (this.section === "Packages" ||
         this.section === "Enabled" ||
-        this.section === "Disabled")
+        this.section === "Disabled" ||
+        this.section === "Core")
         ? "Esc back · ↑↓ scroll"
         : this.section === "Settings"
           ? "Space/Enter toggle setting · Esc close"
@@ -854,7 +893,8 @@ export class ManagerPopup implements Component {
       this.details &&
       (this.section === "Packages" ||
         this.section === "Enabled" ||
-        this.section === "Disabled") &&
+        this.section === "Disabled" ||
+        this.section === "Core") &&
       !shortcut &&
       ![Key.escape, Key.up, Key.down, Key.tab, Key.shift("tab")].some((key) =>
         matchesKey(data, key),
