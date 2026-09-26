@@ -12,7 +12,7 @@ import {
   writeLazyPiState,
 } from "../src/bootstrap.ts";
 import { core } from "../src/catalog.ts";
-import { CommunityRegistry, type RemotePackage } from "../src/community.ts";
+import { CommunityRegistry } from "../src/community.ts";
 import {
   health,
   runSequential,
@@ -57,15 +57,8 @@ export default function (pi: ExtensionAPI) {
       const registry = new CommunityRegistry(agentDir);
       void registry
         .checkUpdates(items)
-        .then((failed) => {
+        .then(({ versions, failed }) => {
           if (failed) return; // A partial registry result is not a trustworthy notification.
-          const versions = new Map<string, RemotePackage>();
-          for (const item of items) {
-            const latest = registry.cachedDetails(
-              identity(item.source).slice(4),
-            );
-            if (latest) versions.set(identity(item.source), latest);
-          }
           const count = updateAllPlan(items, versions).length;
           if (count)
             ctx.ui.notify(
@@ -329,15 +322,7 @@ export default function (pi: ExtensionAPI) {
           const offline = /^(1|true|yes)$/i.test(process.env.PI_OFFLINE ?? "");
           let open = true;
           const community = registry.cachedSearch(query);
-          const versions = new Map<string, RemotePackage>();
-          for (const item of items) {
-            if (item.source.startsWith("npm:")) {
-              const cached = registry.cachedDetails(
-                identity(item.source).slice(4),
-              );
-              if (cached) versions.set(identity(item.source), cached);
-            }
-          }
+          const versions = registry.cachedUpdates(items);
           const choice = await ctx.ui.custom<Choice>(
             (tui, theme, _keys, done) => {
               popup = new ManagerPopup(
@@ -394,28 +379,19 @@ export default function (pi: ExtensionAPI) {
                             : undefined,
                         );
                     } else {
-                      const failed = await registry.checkUpdates(
+                      const snapshot = await registry.checkUpdates(
                         items,
                         refresh,
                       );
-                      for (const item of items) {
-                        if (item.source.startsWith("npm:")) {
-                          const cached = registry.cachedDetails(
-                            identity(item.source).slice(4),
-                          );
-                          if (cached)
-                            versions.set(identity(item.source), cached);
-                        }
-                      }
                       if (open)
                         popup.setRemote(
                           community,
-                          versions,
+                          snapshot.versions,
                           false,
                           offline
                             ? "Offline: showing cached metadata only."
-                            : failed
-                              ? `${failed} package update checks failed; showing cached versions.`
+                            : snapshot.failed
+                              ? `${snapshot.failed} package update checks failed; showing cached versions.`
                               : undefined,
                         );
                     }
@@ -445,16 +421,9 @@ export default function (pi: ExtensionAPI) {
           resourceType = popup.resourceType;
           if (choice.action === "close") return;
           if (choice.action === "update-all") {
-            const failures = await registry.checkUpdates(items);
-            const latest = new Map<string, RemotePackage>();
-            for (const item of items) {
-              if (!item.source.startsWith("npm:")) continue;
-              const pkg = registry.cachedDetails(
-                identity(item.source).slice(4),
-              );
-              if (pkg) latest.set(identity(item.source), pkg);
-            }
-            const updates = updateAllPlan(items, latest);
+            const { versions, failed: failures } =
+              await registry.checkUpdates(items);
+            const updates = updateAllPlan(items, versions);
             if (!updates.length) {
               ctx.ui.notify(
                 "No eligible npm updates found. Pinned, git and local sources are not in this list.",
@@ -468,7 +437,7 @@ export default function (pi: ExtensionAPI) {
                 [
                   ...updates.map(
                     (item) =>
-                      `${item.source} (${item.scope}, ${item.state}) ${item.version} → ${latest.get(identity(item.source))!.version}`,
+                      `${item.source} (${item.scope}, ${item.state}) ${item.version} → ${versions.get(identity(item.source))!.version}`,
                   ),
                   ...(failures
                     ? [

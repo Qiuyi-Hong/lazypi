@@ -188,12 +188,54 @@ test("update check distinguishes newer versions and never advertises pins, missi
   assert.equal(seen.length, 1);
   assert.equal(registry.cachedDetails("example")?.version, "2.0.0");
   assert.equal(
-    await registry.checkUpdates([
-      { ...entry(), scope: "user", state: "enabled" },
-      entry(),
-    ]),
+    (
+      await registry.checkUpdates([
+        { ...entry(), scope: "user", state: "enabled" },
+        entry(),
+      ])
+    ).failed,
     0,
   );
+});
+
+test("update snapshots retain stale versions and report partial refresh failures", async () => {
+  let failExample = false;
+  let time = 10000000;
+  const registry = new CommunityRegistry(
+    dir(),
+    async (url) => {
+      const name = String(url).includes("/example/latest")
+        ? "example"
+        : "second";
+      if (name === "example" && failExample)
+        return new Response("{}", { status: 500 });
+      return new Response(
+        JSON.stringify(pkg(name, failExample ? "3.0.0" : "2.0.0")),
+      );
+    },
+    () => time,
+  );
+  const items = [
+    entry(),
+    { ...entry(), scope: "user" as const },
+    entry("npm:second"),
+    entry("npm:example@1.0.0"),
+    entry("git:example"),
+  ];
+  assert.equal(registry.cachedUpdates(items).size, 0);
+  const first = await registry.checkUpdates(items);
+  assert.equal(first.failed, 0);
+  assert.deepEqual([...first.versions.keys()], ["npm:example", "npm:second"]);
+  assert.equal(first.versions.get("npm:example")?.version, "2.0.0");
+
+  failExample = true;
+  time += 3600001;
+  const checked = await registry.checkUpdates(items);
+  assert.equal(checked.failed, 1);
+  assert.equal(checked.versions.get("npm:example")?.version, "2.0.0");
+  assert.equal(checked.versions.get("npm:second")?.version, "3.0.0");
+  assert.deepEqual(registry.cachedUpdates(items), checked.versions);
+  assert.equal(registry.cachedUpdates([entry("npm:second")]).size, 1);
 });
 
 test("Community popup shows unverified state, fetches manifest on demand and offers native source", async () => {

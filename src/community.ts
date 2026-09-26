@@ -11,6 +11,11 @@ import { core } from "./catalog.ts";
 import { extraSources, extras } from "./extras.ts";
 import { identity, resources, type PackageEntry } from "./packages.ts";
 
+export type UpdateSnapshot = {
+  versions: Map<string, RemotePackage>;
+  failed: number;
+};
+
 export type RemotePackage = {
   name: string;
   source: string;
@@ -227,6 +232,16 @@ export class CommunityRegistry {
   cachedDetails(name: string): RemotePackage | undefined {
     return this.cache.details[name]?.value;
   }
+  cachedUpdates(items: readonly PackageEntry[]): Map<string, RemotePackage> {
+    const versions = new Map<string, RemotePackage>();
+    for (const item of items) {
+      if (!item.source.startsWith("npm:")) continue;
+      const key = identity(item.source);
+      const latest = this.cachedDetails(key.slice(4));
+      if (latest) versions.set(key, latest);
+    }
+    return versions;
+  }
   async search(query: string, force = false): Promise<RemotePackage[]> {
     const key = query.trim().toLowerCase().slice(0, 80);
     const cached = this.cache.searches[key];
@@ -264,8 +279,8 @@ export class CommunityRegistry {
   async checkUpdates(
     items: readonly PackageEntry[],
     force = false,
-  ): Promise<number> {
-    if (offline()) return 0;
+  ): Promise<UpdateSnapshot> {
+    if (offline()) return { versions: this.cachedUpdates(items), failed: 0 };
     const names = [
       ...new Set(
         items
@@ -293,6 +308,6 @@ export class CommunityRegistry {
         }
       }),
     );
-    return failed;
+    return { versions: this.cachedUpdates(items), failed };
   }
 }
