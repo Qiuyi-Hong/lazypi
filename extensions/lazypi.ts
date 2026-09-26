@@ -344,6 +344,9 @@ export default function (pi: ExtensionAPI) {
                       ? "Offline: showing cached metadata only."
                       : undefined,
                   loadDetails: (name) => registry.details(name),
+                  cachedDetails: (name) => registry.cachedDetail(name),
+                  searchTimestamp: registry.cachedSearchAt(query),
+                  offline,
                 },
                 {
                   autoCheckUpdates: preferences.autoCheckUpdates ?? false,
@@ -377,6 +380,7 @@ export default function (pi: ExtensionAPI) {
                           offline
                             ? "Offline: showing cached metadata only."
                             : undefined,
+                          registry.cachedSearchAt(query),
                         );
                     } else {
                       const snapshot = await registry.checkUpdates(

@@ -41,7 +41,12 @@ const npmName = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;
 const offline = () => /^(1|true|yes)$/i.test(process.env.PI_OFFLINE ?? "");
 const text = (value: unknown) =>
   typeof value === "string"
-    ? value.replace(/[\x00-\x1f\x7f-\x9f\x1b]/g, " ").slice(0, 500)
+    ? value
+        .replace(
+          /[\x00-\x1f\x7f-\x9f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g,
+          " ",
+        )
+        .slice(0, 500)
     : "";
 const record = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value)
@@ -232,6 +237,13 @@ export class CommunityRegistry {
   cachedDetails(name: string): RemotePackage | undefined {
     return this.cache.details[name]?.value;
   }
+  cachedDetail(name: string): Cached<RemotePackage> | undefined {
+    return this.cache.details[name];
+  }
+  cachedSearchAt(query: string): number | undefined {
+    return this.cache.searches[query.trim().toLowerCase().slice(0, 80)]
+      ?.timestamp;
+  }
   cachedUpdates(items: readonly PackageEntry[]): Map<string, RemotePackage> {
     const versions = new Map<string, RemotePackage>();
     for (const item of items) {
@@ -250,9 +262,6 @@ export class CommunityRegistry {
     url.searchParams.set("text", `keywords:pi-package${key ? ` ${key}` : ""}`);
     url.searchParams.set("size", "30");
     const result = parseSearch(await this.json(url.toString()));
-    for (const pkg of result)
-      if (this.cache.details[pkg.name]?.value.version !== pkg.version)
-        delete this.cache.details[pkg.name];
     this.cache.searches[key] = { timestamp: this.now(), value: result };
     this.save();
     return result;
@@ -264,7 +273,18 @@ export class CommunityRegistry {
       if (cached) return cached.value;
       throw new Error("Offline: package details not cached");
     }
-    if (!force && this.fresh(cached)) return cached!.value;
+    if (
+      !force &&
+      this.fresh(cached) &&
+      !Object.values(this.cache.searches).some(
+        (search) =>
+          search.timestamp > cached!.timestamp &&
+          search.value.some(
+            (pkg) => pkg.name === name && pkg.version !== cached!.value.version,
+          ),
+      )
+    )
+      return cached!.value;
     const pkg = parseDetails(
       await this.json(
         `https://registry.npmjs.org/${encodeURIComponent(name)}/latest`,
