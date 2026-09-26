@@ -368,8 +368,12 @@ test("Core keeps catalog entries separate from absent, missing and installed Pi 
     absent,
     /Source:|Scope:|Version:|Resources:|Installed path:|choose at install|State: enabled/,
   );
-  ui.handleInput("i"); // Details are read-only; actions belong to the list.
-  assert.deepEqual(choices, []);
+  ui.handleInput("i"); // Core actions remain available in details.
+  assert.deepEqual(choices.pop(), {
+    action: "install",
+    source: "npm:pi-mcp-adapter",
+    entry: undefined,
+  });
   ui.handleInput("\u001b");
   assert.match(frame(120), /› MCP Adapter/);
   ui.handleInput("i");

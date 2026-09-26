@@ -801,8 +801,7 @@ export class ManagerPopup implements Component {
       this.details &&
       (this.section === "Packages" ||
         this.section === "Enabled" ||
-        this.section === "Disabled" ||
-        this.section === "Core")
+        this.section === "Disabled")
         ? "Esc back · ↑↓ scroll"
         : this.section === "Settings"
           ? "Space/Enter toggle setting · Esc close"
@@ -893,8 +892,7 @@ export class ManagerPopup implements Component {
       this.details &&
       (this.section === "Packages" ||
         this.section === "Enabled" ||
-        this.section === "Disabled" ||
-        this.section === "Core") &&
+        this.section === "Disabled") &&
       !shortcut &&
       ![Key.escape, Key.up, Key.down, Key.tab, Key.shift("tab")].some((key) =>
         matchesKey(data, key),
