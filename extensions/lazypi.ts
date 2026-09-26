@@ -192,7 +192,6 @@ export default function (pi: ExtensionAPI) {
       let category: ExtraCategory | undefined;
       let resourceType: PiResourceType | "all" = "all";
       let deferredSetup = false;
-      let forceRefresh = false;
       const registry = new CommunityRegistry(agentDir);
       for (;;) {
         try {
@@ -318,11 +317,67 @@ export default function (pi: ExtensionAPI) {
           }
           let popup!: ManagerPopup;
           const remoteSection = active === "Community" || active === "Updates";
-          const remoteTab = active;
           const offline = /^(1|true|yes)$/i.test(process.env.PI_OFFLINE ?? "");
           let open = true;
-          const community = registry.cachedSearch(query);
-          const versions = registry.cachedUpdates(items);
+          let remoteRequest = 0;
+          const loadRemote = (tab: "Community" | "Updates", force: boolean) => {
+            const request = ++remoteRequest;
+            const community = registry.cachedSearch(popup.query);
+            const versions = registry.cachedUpdates(items);
+            popup.setRemote(
+              community,
+              versions,
+              !offline,
+              offline ? "Offline: showing cached metadata only." : undefined,
+              registry.cachedSearchAt(popup.query),
+            );
+            void (async () => {
+              try {
+                if (tab === "Community") {
+                  const result = await registry.search(popup.query, force);
+                  if (
+                    open &&
+                    request === remoteRequest &&
+                    popup.section === tab
+                  )
+                    popup.setRemote(
+                      result,
+                      versions,
+                      false,
+                      offline
+                        ? "Offline: showing cached metadata only."
+                        : undefined,
+                      registry.cachedSearchAt(popup.query),
+                    );
+                } else {
+                  const snapshot = await registry.checkUpdates(items, force);
+                  if (
+                    open &&
+                    request === remoteRequest &&
+                    popup.section === tab
+                  )
+                    popup.setRemote(
+                      community,
+                      snapshot.versions,
+                      false,
+                      offline
+                        ? "Offline: showing cached metadata only."
+                        : snapshot.failed
+                          ? `${snapshot.failed} package update checks failed; showing cached versions.`
+                          : undefined,
+                    );
+                }
+              } catch (error) {
+                if (open && request === remoteRequest && popup.section === tab)
+                  popup.setRemote(
+                    community,
+                    versions,
+                    false,
+                    error instanceof Error ? error.message : String(error),
+                  );
+              }
+            })();
+          };
           const choice = await ctx.ui.custom<Choice>(
             (tui, theme, _keys, done) => {
               popup = new ManagerPopup(
@@ -336,8 +391,8 @@ export default function (pi: ExtensionAPI) {
                 category,
                 resourceType,
                 {
-                  community,
-                  versions,
+                  community: registry.cachedSearch(query),
+                  versions: registry.cachedUpdates(items),
                   loading: remoteSection && !offline,
                   error:
                     remoteSection && offline
@@ -363,53 +418,11 @@ export default function (pi: ExtensionAPI) {
                     return false;
                   }
                 },
+                loadRemote,
               );
               // The first frame renders local/cached data; registry I/O runs afterward.
-              if (remoteSection) {
-                const refresh = forceRefresh;
-                forceRefresh = false;
-                void (async () => {
-                  try {
-                    if (remoteTab === "Community") {
-                      const result = await registry.search(query, refresh);
-                      if (open)
-                        popup.setRemote(
-                          result,
-                          versions,
-                          false,
-                          offline
-                            ? "Offline: showing cached metadata only."
-                            : undefined,
-                          registry.cachedSearchAt(query),
-                        );
-                    } else {
-                      const snapshot = await registry.checkUpdates(
-                        items,
-                        refresh,
-                      );
-                      if (open)
-                        popup.setRemote(
-                          community,
-                          snapshot.versions,
-                          false,
-                          offline
-                            ? "Offline: showing cached metadata only."
-                            : snapshot.failed
-                              ? `${snapshot.failed} package update checks failed; showing cached versions.`
-                              : undefined,
-                        );
-                    }
-                  } catch (error) {
-                    if (open)
-                      popup.setRemote(
-                        community,
-                        versions,
-                        false,
-                        error instanceof Error ? error.message : String(error),
-                      );
-                  }
-                })();
-              }
+              if (active === "Community" || active === "Updates")
+                loadRemote(active, false);
               return popup;
             },
             {
@@ -423,7 +436,6 @@ export default function (pi: ExtensionAPI) {
             },
           );
           open = false;
-          const previous = active;
           active = popup.section;
           query = popup.query;
           category = popup.category;
@@ -485,12 +497,7 @@ export default function (pi: ExtensionAPI) {
             query = (await ctx.ui.input("Search packages", query)) ?? query;
             continue;
           }
-          if (choice.action === "refresh") {
-            forceRefresh =
-              previous === active &&
-              (active === "Community" || active === "Updates");
-            continue;
-          }
+          if (choice.action === "refresh") continue;
           if (
             choice.action === "extra" &&
             choice.extra &&

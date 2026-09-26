@@ -123,11 +123,12 @@ function preview(
     if (wrapped.length > limit) overflow = true;
   };
   add(row.name);
-  if (entry?.description) add(entry.description, 2);
+  const description = entry?.description ?? row.core?.description;
+  if (description) add(description, 2);
   const source = plain(`Source: ${entry?.source ?? row.source ?? ""}`);
   lines.push(truncateToWidth(source, width, "…"));
   if (visibleWidth(source) > width) overflow = true;
-  add(`Scope: ${entry?.scope ?? ""}`);
+  add(`Scope: ${entry?.scope ?? (row.core ? "not configured" : "")}`);
   add(`State: ${row.state}`);
   if (entry?.version) add(`Version: ${entry.version}`);
   if (entry?.resources.length) add(`Resources: ${entry.resources.join(", ")}`);
@@ -223,6 +224,7 @@ export class ManagerPopup implements Component {
   private disposed = false;
   private preferences: { autoCheckUpdates: boolean };
   private onSettingChange: (setting: Preference, enabled: boolean) => boolean;
+  private onRemote?: (section: "Community" | "Updates", force: boolean) => void;
   constructor(
     tui: TUI,
     theme: Theme,
@@ -248,6 +250,7 @@ export class ManagerPopup implements Component {
     preferences = { autoCheckUpdates: false },
     onSettingChange: (setting: Preference, enabled: boolean) => boolean = () =>
       true,
+    onRemote?: (section: "Community" | "Updates", force: boolean) => void,
   ) {
     this.tui = tui;
     this.theme = theme;
@@ -268,6 +271,7 @@ export class ManagerPopup implements Component {
     this.offline = remote.offline ?? false;
     this.preferences = preferences;
     this.onSettingChange = onSettingChange;
+    this.onRemote = onRemote;
   }
 
   setRemote(
@@ -586,16 +590,14 @@ export class ManagerPopup implements Component {
       const prompt = ["Esc · resize"];
       return this.frame(prompt, w, height);
     }
-    const grouped = (labels: string[]) =>
-      `${labels.slice(0, 3).join("  ")}  │  ${labels.slice(3, 5).join("  ")}  │  ${labels[5]}`;
-    const wideNav = grouped(header);
-    const smallNav = grouped(
-      sections.map((s) =>
+    const wideNav = header.join("  ");
+    const smallNav = sections
+      .map((s) =>
         s === active
           ? this.theme.fg("accent", `[${s}]`)
           : this.theme.fg("muted", s),
-      ),
-    );
+      )
+      .join("  ");
     const navigation =
       height < 14
         ? `${active} · Tab sections`
@@ -734,13 +736,15 @@ export class ManagerPopup implements Component {
       );
       // ponytail: fit gate, not a tuned breakpoint. Raise if state and source no longer both fit.
       const roomy =
-        (this.section === "Packages" || !!current?.extra) &&
+        (this.section === "Packages" ||
+          this.section === "Core" ||
+          !!current?.extra) &&
         inner >= listMin + gutter.length + paneMin &&
         bodySize >= 10 &&
         (this.section === "Packages" || visible >= 4) &&
         rows.every(
           (item) =>
-            !item.extra ||
+            (!item.extra && !item.core) ||
             visibleWidth(`${plain(item.name)}  ${item.state}`) + 2 <=
               inner - gutter.length - paneWidth,
         );
@@ -871,23 +875,21 @@ export class ManagerPopup implements Component {
           const status = `  ${plain(item.state)}`;
           const name = truncateToWidth(
             plain(item.name),
-            Math.max(1, inner - 2 - visibleWidth(status)),
+            Math.max(1, (roomy ? listWidth : inner) - 2 - visibleWidth(status)),
           );
-          body.push(
-            this.focus(
-              line(`${selected ? "›" : " "} ${name}${status}`),
-              selected,
-              item.state,
-            ),
-          );
-          if (this.section !== "Settings")
-            body.push(
-              this.theme.fg("muted", line(`  ${plain(item.description)}`)),
-            );
-          if (item.metadata)
-            body.push(
-              this.theme.fg("muted", line(`  ${plain(item.metadata)}`)),
-            );
+          const row = `${selected ? "›" : " "} ${name}${status}`;
+          if (roomy) listLines.push(row);
+          else {
+            body.push(this.focus(line(row), selected, item.state));
+            if (this.section !== "Settings")
+              body.push(
+                this.theme.fg("muted", line(`  ${plain(item.description)}`)),
+              );
+            if (item.metadata)
+              body.push(
+                this.theme.fg("muted", line(`  ${plain(item.metadata)}`)),
+              );
+          }
         }
       }
       if (roomy && current) {
@@ -1080,9 +1082,10 @@ export class ManagerPopup implements Component {
       this.selected = 0;
       this.details = false;
       this.detailOffset = 0;
-      if (this.section === "Community" || this.section === "Updates")
-        this.done({ action: "refresh" });
-      else this.tui.requestRender();
+      if (this.section === "Community" || this.section === "Updates") {
+        if (this.onRemote) this.onRemote(this.section, false);
+        else this.done({ action: "refresh" });
+      } else this.tui.requestRender();
     } else if (matchesKey(data, Key.down) || data === "j") {
       if (this.details)
         this.detailOffset = Math.min(this.detailLimit, this.detailOffset + 1);
@@ -1119,8 +1122,14 @@ export class ManagerPopup implements Component {
       this.selected = 0;
       this.details = false;
       this.tui.requestRender();
-    } else if (data === "r") this.done({ action: "refresh" });
-    else if (
+    } else if (data === "r") {
+      if (
+        this.onRemote &&
+        (this.section === "Community" || this.section === "Updates")
+      )
+        this.onRemote(this.section, true);
+      else this.done({ action: "refresh" });
+    } else if (
       this.section === "Extras" &&
       (data === " " || data === "i" || data === "x")
     ) {

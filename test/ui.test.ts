@@ -355,12 +355,12 @@ test("Core keeps catalog entries separate from absent, missing and installed Pi 
     assert.match(lines.at(-2)!, /Esc/);
     return lines.join("\n");
   };
-  assert.match(frame(120), /MCP Adapter.*not installed/);
-  assert.match(frame(120), /Subagents.*missing/);
-  assert.match(frame(120), /Web Access.*disabled/);
+  assert.match(frame(120), /pi-mcp-adapter.*not installed/);
+  assert.match(frame(120), /pi-subagents.*missing/);
+  assert.match(frame(120), /pi-web-access.*disabled/);
   ui.handleInput("\r");
   const absent = frame(120);
-  assert.match(absent, /MCP Adapter/);
+  assert.match(absent, /pi-mcp-adapter/);
   assert.match(absent, /Category: Integrations/);
   assert.match(absent, /Connect Pi to MCP tools and services/);
   assert.match(absent, /not installed/);
@@ -375,7 +375,7 @@ test("Core keeps catalog entries separate from absent, missing and installed Pi 
     entry: undefined,
   });
   ui.handleInput("\u001b");
-  assert.match(frame(120), /› MCP Adapter/);
+  assert.match(frame(120), /› pi-mcp-adapter/);
   ui.handleInput("i");
   assert.deepEqual(choices.pop(), {
     action: "install",
@@ -384,7 +384,7 @@ test("Core keeps catalog entries separate from absent, missing and installed Pi 
   });
 
   ui.handleInput("j");
-  assert.match(frame(120), /› Subagents.*missing/);
+  assert.match(frame(120), /› pi-subagents.*missing/);
   ui.handleInput("\r");
   const missing = frame(120);
   assert.match(missing, /Category: AI/);
@@ -396,7 +396,7 @@ test("Core keeps catalog entries separate from absent, missing and installed Pi 
     /Version:|Resources:|Author:|Repository:|choose at install/,
   );
   ui.handleInput("\u001b");
-  assert.match(frame(120), /› Subagents.*missing/);
+  assert.match(frame(120), /› pi-subagents.*missing/);
   ui.handleInput("i");
   assert.deepEqual(choices.pop(), {
     action: "install",
@@ -405,7 +405,7 @@ test("Core keeps catalog entries separate from absent, missing and installed Pi 
   });
 
   ui.handleInput("j");
-  assert.match(frame(120), /› Web Access.*disabled/);
+  assert.match(frame(120), /› pi-web-access.*disabled/);
   ui.handleInput("\r");
   for (const [width, rows] of [
     [120, 30],
@@ -438,10 +438,71 @@ test("Core keeps catalog entries separate from absent, missing and installed Pi 
     assert.match(frame(width).split("\n").at(-2)!, /end/);
   }
   ui.handleInput("\u001b");
-  assert.match(frame(30), /› Web Access/);
+  assert.match(frame(30), /› pi-web-access/);
   assert.match(frame(30), /disabled/);
   ui.handleInput("d");
   assert.deepEqual(choices.pop(), { action: "disable", entry: entries[2] });
+});
+
+test("Core shows the selected package in the same right-hand preview as Packages", () => {
+  const ui = new ManagerPopup(
+    tui,
+    theme,
+    () => {},
+    [
+      {
+        source: "npm:pi-subagents@4.0.0",
+        name: "pi-subagents",
+        scope: "project",
+        state: "missing",
+        resources: [],
+      },
+      {
+        source: "npm:pi-web-access",
+        name: "pi-web-access",
+        scope: "user",
+        state: "enabled",
+        path: "/local/web",
+        version: "2.0.0",
+        description: "Local web tools",
+        resources: ["extensions"],
+      },
+    ],
+    "Core",
+  );
+  const right = () =>
+    ui
+      .render(120)
+      .map((line) => line.split(" │ ")[1] ?? "")
+      .join("\n");
+  const aligned = (name: string) => {
+    const lines = ui.render(120);
+    assert.equal(
+      lines.findIndex((line) =>
+        /[ ›] pi-mcp-adapter\s+not installed/.test(line),
+      ),
+      lines.findIndex((line) => line.includes(` │ ${name}`)),
+    );
+  };
+  aligned("pi-mcp-adapter");
+  assert.match(right(), /pi-mcp-adapter/);
+  assert.match(right(), /Source: npm:pi-mcp-adapter/);
+  assert.match(right(), /Scope: not configured/);
+  assert.match(right(), /State: not installed/);
+  ui.handleInput("j");
+  aligned("pi-subagents");
+  assert.match(right(), /Source: npm:pi-subagents@4\.0\.0/);
+  assert.match(right(), /Scope: project/);
+  assert.match(right(), /State: missing/);
+  ui.handleInput("j");
+  aligned("pi-web-access");
+  assert.match(right(), /Local web tools/);
+  assert.match(right(), /Source: npm:pi-web-access/);
+  assert.match(right(), /Scope: user/);
+  assert.match(right(), /State: enabled/);
+  assert.match(right(), /Version: 2\.0\.0/);
+  assert.match(right(), /Resources: extensions/);
+  assert.doesNotMatch(ui.render(46).join("\n"), / │ /);
 });
 
 test("Core details retain installed user facts alongside a missing project override", () => {
@@ -471,7 +532,7 @@ test("Core details retain installed user facts alongside a missing project overr
     "Core",
   );
   ui.handleInput("j");
-  assert.match(ui.render(120).join("\n"), /› Subagents.*missing/);
+  assert.match(ui.render(120).join("\n"), /› pi-subagents.*missing/);
   ui.handleInput("\r");
   const detail = ui.render(120).join("\n");
   assert.match(detail, /Scope: user · State: shadowed/);
@@ -632,7 +693,7 @@ test("popup renders within narrow terminal widths and supports section navigatio
   ui.handleInput(" ");
   ui.handleInput("\t");
   assert.equal(ui.section, "Core");
-  assert.ok(ui.render(76).some((line) => line.includes("MCP Adapter")));
+  assert.ok(ui.render(76).some((line) => line.includes("pi-mcp-adapter")));
   ui.handleInput("\t");
   assert.equal(ui.section, "Extras");
   assert.ok(ui.render(76).some((line) => line.includes("AI & Agents")));
@@ -670,6 +731,7 @@ test("uppercase keys jump to every section without replacing existing actions", 
     ui.render(120).filter((line) => /Settings \(S\)/.test(line)).length,
     1,
   );
+  assert.doesNotMatch(header.slice(2, -2), /│/);
   for (const [name, key] of [
     ["Packages", "P"],
     ["Core", "C"],

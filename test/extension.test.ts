@@ -29,6 +29,94 @@ test("npm extension entrypoint registers the /lazypi command without side effect
   assert.deepEqual(registered, ["lazypi"]);
 });
 
+test("Community and Updates keep one overlay and ignore late registry responses", async () => {
+  const root = mkdtempSync(join(tmpdir(), "lazypi-remote-tabs-"));
+  const agent = join(root, "agent");
+  markSetupComplete(agent);
+  const previousDir = process.env.PI_CODING_AGENT_DIR;
+  const previousFetch = globalThis.fetch;
+  const previousOffline = process.env.PI_OFFLINE;
+  process.env.PI_CODING_AGENT_DIR = agent;
+  delete process.env.PI_OFFLINE;
+  const responses: ((response: Response) => void)[] = [];
+  globalThis.fetch = (async () =>
+    new Promise<Response>((resolve) => {
+      responses.push(resolve);
+    })) as typeof fetch;
+  try {
+    let handler!: RegisteredCommand["handler"];
+    extension({
+      on: () => {},
+      registerCommand: (
+        _name: string,
+        command: { handler: RegisteredCommand["handler"] },
+      ) => {
+        handler = command.handler;
+      },
+    } as unknown as Parameters<typeof extension>[0]);
+    let popup!: ManagerPopup;
+    let openings = 0;
+    const running = handler("packages", {
+      mode: "tui",
+      cwd: root,
+      isProjectTrusted: () => false,
+      ui: {
+        custom: async (
+          factory: Parameters<ExtensionCommandContext["ui"]["custom"]>[0],
+        ) =>
+          new Promise((done) => {
+            openings++;
+            popup = factory(
+              { requestRender: () => {}, terminal: { rows: 24 } } as TUI,
+              { fg: (_color: string, text: string) => text } as Theme,
+              {} as Parameters<typeof factory>[2],
+              done,
+            ) as ManagerPopup;
+          }),
+        notify: () => {},
+      },
+    } as unknown as ExtensionCommandContext);
+    await new Promise((resolve) => setImmediate(resolve));
+    popup.handleInput("M");
+    assert.equal(responses.length, 1);
+    popup.handleInput("T");
+    popup.handleInput("P");
+    popup.handleInput("M");
+    assert.equal(responses.length, 2);
+    const respond = (index: number, name: string) =>
+      responses[index]!(
+        new Response(
+          JSON.stringify({
+            objects: [
+              { package: { name, version: "1.0.0", keywords: ["pi-package"] } },
+            ],
+          }),
+        ),
+      );
+    respond(0, "old-result");
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.doesNotMatch(popup.render(76).join("\n"), /old-result/);
+    respond(1, "new-result");
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.match(popup.render(76).join("\n"), /new-result/);
+    popup.handleInput("r");
+    assert.equal(responses.length, 3); // Explicit refresh bypasses the fresh cache.
+    assert.match(popup.render(76).join("\n"), /new-result/);
+    respond(2, "refreshed-result");
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.match(popup.render(76).join("\n"), /refreshed-result/);
+    popup.handleInput("\u001b");
+    await running;
+    assert.equal(openings, 1);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previousDir;
+    if (previousOffline === undefined) delete process.env.PI_OFFLINE;
+    else process.env.PI_OFFLINE = previousOffline;
+  }
+});
+
 test("switching sections clears search across popup reopen and search prompts", async () => {
   const root = mkdtempSync(join(tmpdir(), "lazypi-search-command-"));
   const agent = join(root, "agent");
@@ -73,9 +161,7 @@ test("switching sections clears search across popup reopen and search prompts", 
               case 1:
                 assert.match(popup.render(76).join("\n"), /Search: yagni/);
                 popup.handleInput("P");
-                popup.handleInput("M"); // Remote sections recreate the popup.
-                break;
-              case 2:
+                popup.handleInput("M");
                 assert.equal(popup.section, "Community");
                 assert.match(
                   popup.render(76).join("\n"),
@@ -96,7 +182,7 @@ test("switching sections clears search across popup reopen and search prompts", 
       },
     } as unknown as ExtensionCommandContext);
     assert.deepEqual(errors, []);
-    assert.equal(openings, 4);
+    assert.equal(openings, 3);
     assert.equal(prompts, 2);
   } finally {
     if (previousDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
