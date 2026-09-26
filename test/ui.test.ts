@@ -112,6 +112,9 @@ test("short registry errors leave the selected row and exit visible", () => {
     "offline",
   );
   assert.match(ui.render(30).at(-2)!, /↑↓ 1\/2 · Registry!/);
+  ui.handleInput("\r");
+  assert.match(ui.render(30).at(-2)!, /Registry!/);
+  assert.match(ui.render(30).at(-2)!, /Esc/);
 });
 
 test("detail scrolling reveals wrapped fields without changing selection or frame", () => {

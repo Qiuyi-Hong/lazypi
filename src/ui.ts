@@ -769,7 +769,6 @@ export class ManagerPopup implements Component {
     lines.push(...body.slice(0, bodySize));
     while (lines.length < height - 2 - footerRows) lines.push("");
     const registry =
-      !this.details &&
       (this.section === "Community" || this.section === "Updates") &&
       rows.length &&
       (this.remoteError || this.loading)
@@ -786,9 +785,11 @@ export class ManagerPopup implements Component {
         "muted",
         line(
           registry && footerRows === 1
-            ? rows.length > 1
-              ? `Esc · ↑↓ ${this.selected + 1}/${rows.length} · Registry!`
-              : `Esc · ${registry}`
+            ? this.details
+              ? `Esc · ${this.detailOffset + 1}/${this.detailLimit + 1} ${this.detailOffset < this.detailLimit ? "↓" : "end"} Registry!`
+              : rows.length > 1
+                ? `Esc · ↑↓ ${this.selected + 1}/${rows.length} · Registry!`
+                : `Esc · ${registry}`
             : footer,
         ),
       ),
