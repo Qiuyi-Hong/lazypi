@@ -4,6 +4,7 @@ import {
   matchesKey,
   truncateToWidth,
   visibleWidth,
+  wrapTextWithAnsi,
   type Component,
   type TUI,
 } from "@earendil-works/pi-tui";
@@ -27,19 +28,15 @@ import { identity, type PackageEntry } from "./packages.ts";
 
 export const sections = [
   "Packages",
-  "Enabled",
-  "Disabled",
   "Core",
   "Extras",
   "Community",
   "Updates",
   "Settings",
 ] as const;
-export type Section = (typeof sections)[number];
-const sectionShortcuts: Record<Section, string> = {
+export type Section = (typeof sections)[number] | "Enabled" | "Disabled";
+const sectionShortcuts: Record<(typeof sections)[number], string> = {
   Packages: "P",
-  Enabled: "E",
-  Disabled: "D",
   Core: "C",
   Extras: "X",
   Community: "M",
@@ -92,10 +89,15 @@ function extraRow(
       lines: [`${prefix}${truncateToWidth(plain(name), room)}${status}`],
       yieldRest: false,
     };
+  const short = state.replace(/ \([^)]*\)/, "");
+  const compact =
+    visibleWidth(short) <= width
+      ? short
+      : short.replace("partially installed", "partial install");
   return {
     lines: [
       truncateToWidth(`${prefix}${plain(name)}`, width),
-      truncateToWidth(state, width),
+      truncateToWidth(compact, width),
     ],
     yieldRest: true,
   };
@@ -122,6 +124,8 @@ function preview(row: Row): string[] {
 export class ManagerPopup implements Component {
   private selected = 0;
   private details = false;
+  private detailOffset = 0;
+  private detailLimit = 0;
   private tui: TUI;
   private theme: Theme;
   private done: (value: Choice) => void;
@@ -360,99 +364,132 @@ export class ManagerPopup implements Component {
 
   render(width: number): string[] {
     const w = Math.max(1, width);
-    const line = (text: string) => truncateToWidth(text, w);
+    const height = Math.min(26, Math.max(1, this.tui.terminal.rows - 2));
+    const inner = Math.max(1, w - 4);
+    const line = (text: string) => truncateToWidth(text, inner);
     const rows = this.rows();
     this.selected = Math.min(this.selected, Math.max(0, rows.length - 1));
     const current = rows[this.selected];
+    const active =
+      this.section === "Enabled" || this.section === "Disabled"
+        ? "Packages"
+        : this.section;
     const header = sections.map((s) => {
       const label = `${s} (${sectionShortcuts[s]})`;
-      return s === this.section ? this.theme.fg("accent", `[${label}]`) : label;
+      return s === active
+        ? this.theme.fg("accent", `[${label}]`)
+        : this.theme.fg("muted", label);
     });
-    const lines = [
-      this.theme.fg("accent", line("LazyPi · native Pi packages")),
-      line(header.join(" ")),
-      line(
-        this.section === "Extras"
-          ? `Extras${this.category ? ` / ${EXTRA_CATEGORIES[this.category]}` : ""} · Type: ${this.resourceType === "all" ? "All" : `${this.resourceType}s`}`
-          : `Search: ${this.query || "(press /)"}`,
+    if (w < 12 || height < 6) {
+      const prompt = ["Esc · resize"];
+      return this.frame(prompt, w, height);
+    }
+    const grouped = (labels: string[]) =>
+      `${labels.slice(0, 3).join("  ")}  │  ${labels.slice(3, 5).join("  ")}  │  ${labels[5]}`;
+    const wideNav = grouped(header);
+    const smallNav = grouped(
+      sections.map((s) =>
+        s === active
+          ? this.theme.fg("accent", `[${s}]`)
+          : this.theme.fg("muted", s),
       ),
-      ...(this.section === "Extras"
-        ? [line(`Search: ${this.query || "(press /)"}`)]
-        : []),
-      "",
-    ];
+    );
+    const navigation =
+      height < 14
+        ? `${active} · Tab sections`
+        : visibleWidth(wideNav) <= inner
+          ? wideNav
+          : visibleWidth(smallNav) <= inner
+            ? smallNav
+            : `${active} · Tab sections`;
+    const context =
+      this.section === "Extras"
+        ? `Extras${this.category ? ` / ${EXTRA_CATEGORIES[this.category]}` : ""} · Type: ${this.resourceType === "all" ? "All" : `${this.resourceType}s`} · Search: ${this.query || "(press /)"}`
+        : this.section === "Enabled" || this.section === "Disabled"
+          ? `Packages · ${this.section} · Search: ${this.query || "(press /)"}`
+          : `Search: ${this.query || "(press /)"}`;
+    const lines =
+      height < 8
+        ? [
+            this.theme.fg(
+              "accent",
+              line(
+                `${active}${active !== this.section ? `/${this.section}` : ""} · Tab`,
+              ),
+            ),
+          ]
+        : [
+            this.theme.fg("accent", line("LazyPi · native Pi packages")),
+            line(navigation),
+            ...(height >= 10 ? [line(context)] : []),
+            ...(height >= 16 ? [""] : []),
+          ];
+    const footerRows = height >= 16 ? 2 : 1;
+    const bodySize = height - 2 - lines.length - footerRows;
+    const body: string[] = [];
     if (this.details && current) {
+      const detail: string[] = [];
       const e = current.entry;
       const remote =
         current.remote &&
         (this.detailsByName.get(current.remote.name) ?? current.remote);
-      lines.push(line(plain(current.name)));
-      if (this.section === "Community") lines.push(line("unverified"));
-      lines.push(line(plain(current.description)));
+      detail.push(plain(current.name));
+      if (this.section === "Community") detail.push("unverified");
       if (!current.extra)
-        lines.push(
-          line(plain(`Source: ${e?.source ?? current.source ?? ""}`)),
+        detail.push(
+          plain(`Source: ${e?.source ?? current.source ?? ""}`),
           ...(this.section === "Community"
             ? [
-                line(plain(`Scope: ${e?.scope ?? "choose at install"}`)),
-                line(plain(`State: ${e?.state ?? "not installed"}`)),
+                plain(`Scope: ${e?.scope ?? "choose at install"}`),
+                plain(`State: ${e?.state ?? "not installed"}`),
               ]
             : [
-                line(
-                  plain(
-                    `Scope: ${e?.scope ?? "choose at install"} · State: ${current.state}`,
-                  ),
+                plain(
+                  `Scope: ${e?.scope ?? "choose at install"} · State: ${current.state}`,
                 ),
               ]),
-          line(
-            plain(
-              `Version: ${e?.version ?? "unknown"} · Resources: ${e?.resources.join(", ") || "unknown"}`,
-            ),
+          plain(
+            `Version: ${e?.version ?? "unknown"} · Resources: ${e?.resources.join(", ") || "unknown"}`,
           ),
-          line(
-            plain(
-              `Repository: ${e?.repository ?? "unknown"} · Author: ${e?.author ?? "unknown"}`,
-            ),
+          plain(
+            `Repository: ${e?.repository ?? "unknown"} · Author: ${e?.author ?? "unknown"}`,
           ),
         );
+      detail.push(plain(current.description));
       if (current.extra) {
         const extra = current.extra;
-        lines.push(
-          line(
-            `Category: ${EXTRA_CATEGORIES[extra.category]} · ${current.state}`,
-          ),
-          line(`Resources: ${extra.resourceTypes.join(", ") || "workflow"}`),
-          line(`Tags: ${extra.tags.join(", ")}`),
-          line(`Requires: ${extra.requires?.join(", ") || "none"}`),
-          ...this.extraFacts(extra).map((fact) => line(fact)),
-          line("Disabling a selection does not uninstall packages."),
+        detail.push(
+          `Category: ${EXTRA_CATEGORIES[extra.category]} · ${current.state}`,
+          `Resources: ${extra.resourceTypes.join(", ") || "workflow"}`,
+          `Tags: ${extra.tags.join(", ")}`,
+          `Requires: ${extra.requires?.join(", ") || "none"}`,
+          ...this.extraFacts(extra),
+          "Disabling a selection does not uninstall packages.",
         );
       } else if (e || current.source) {
-        lines.push(
-          line(
-            `Required by: ${requiredBy(e?.source ?? current.source!, this.selections).join(", ") || "no LazyPi selection"}`,
-          ),
+        detail.push(
+          `Required by: ${requiredBy(e?.source ?? current.source!, this.selections).join(", ") || "no LazyPi selection"}`,
         );
       }
       if (remote)
-        lines.push(
-          line(
-            this.section === "Community"
-              ? `Latest: ${plain(remote.version)}`
-              : `Community · unverified · latest ${remote.version}`,
-          ),
-          line(
-            `Provides: ${remote.resources.join(", ") || "unknown (manifest not loaded)"}`,
-          ),
-          line(
-            `Repository: ${remote.repository || "unknown"} · Author: ${remote.author || "unknown"}`,
-          ),
-          line(`Published: ${remote.published || "unknown"}`),
-          line(`Dependencies: ${remote.dependencies?.join(", ") || "unknown"}`),
+        detail.push(
+          this.section === "Community"
+            ? `Latest: ${plain(remote.version)}`
+            : `Community · unverified · latest ${plain(remote.version)}`,
+          `Provides: ${plain(remote.resources.join(", ")) || "unknown (manifest not loaded)"}`,
+          `Repository: ${plain(remote.repository || "unknown")} · Author: ${plain(remote.author || "unknown")}`,
+          `Published: ${plain(remote.published || "unknown")}`,
+          `Dependencies: ${plain(remote.dependencies?.join(", ") || "unknown")}`,
         );
-      if (e?.error) lines.push(line(plain(e.error)));
+      if (e?.error) detail.push(plain(e.error));
+      const wrapped = detail.flatMap((text) => wrapTextWithAnsi(text, inner));
+      this.detailLimit = Math.max(0, wrapped.length - bodySize);
+      this.detailOffset = Math.min(this.detailOffset, this.detailLimit);
+      body.push(
+        ...wrapped.slice(this.detailOffset, this.detailOffset + bodySize),
+      );
     } else if (!rows.length)
-      lines.push(
+      body.push(
         line(
           this.loading
             ? "Loading npm metadata…"
@@ -464,36 +501,33 @@ export class ManagerPopup implements Component {
         this.section === "Packages" ||
         this.section === "Enabled" ||
         this.section === "Disabled";
-      const visible = packageRows
-        ? Math.max(1, Math.min(12, Math.min(this.tui.terminal.rows, 26) - 12))
-        : Math.max(
-            1,
-            Math.min(
-              7,
-              Math.floor(
-                (this.tui.terminal.rows - 12) /
-                  (this.section === "Extras" && (this.category || this.query)
-                    ? 4
-                    : 2),
-              ),
-            ),
-          );
-      const inner = Math.max(0, w - 2);
+      const visible =
+        packageRows || this.section === "Settings"
+          ? Math.max(1, bodySize - 1)
+          : Math.max(
+              1,
+              Math.floor((bodySize - 1) / (this.section === "Extras" ? 3 : 2)),
+            );
       const gutter = " │ ";
       const listMin = 26;
       const paneMin = 22;
+      const paneWidth = Math.max(
+        paneMin,
+        Math.min(40, Math.floor((inner - gutter.length) * 0.42)),
+      );
       // ponytail: fit gate, not a tuned breakpoint. Raise if state and source no longer both fit.
       const roomy =
         (this.section === "Packages" || !!current?.extra) &&
-        w >= 4 &&
         inner >= listMin + gutter.length + paneMin &&
-        visible >= 6;
-      const pane = roomy
-        ? Math.max(
-            paneMin,
-            Math.min(40, Math.floor((inner - gutter.length) * 0.42)),
-          )
-        : 0;
+        bodySize >= 10 &&
+        (this.section === "Packages" || visible >= 4) &&
+        rows.every(
+          (item) =>
+            !item.extra ||
+            visibleWidth(`${plain(item.name)}  ${item.state}`) + 2 <=
+              inner - gutter.length - paneWidth,
+        );
+      const pane = roomy ? paneWidth : 0;
       const listWidth = roomy ? inner - gutter.length - pane : 0;
       const start = Math.max(
         0,
@@ -511,59 +545,87 @@ export class ManagerPopup implements Component {
           this.section === "Extras" &&
           !this.category &&
           this.query &&
+          bodySize >= 4 &&
           item.extra &&
           item.category &&
           (offset === 0 || rows[start + offset - 1]?.category !== item.category)
         )
-          lines.push(
+          body.push(
             this.theme.fg("accent", line(EXTRA_CATEGORIES[item.category])),
           );
         if (packageRows) {
           const status = `  ${item.state} · ${item.entry!.scope}`;
           const name = truncateToWidth(
             plain(item.name),
-            Math.max(
-              1,
-              (roomy ? listWidth : w) - (roomy ? 2 : 4) - visibleWidth(status),
-            ),
+            Math.max(1, (roomy ? listWidth : inner) - 2 - visibleWidth(status)),
           );
           const row = `${selected ? "›" : " "} ${name}${status}`;
           if (roomy) listLines.push(row);
-          else lines.push(line(row));
+          else body.push(this.focus(line(row), selected, item.state));
         } else if (item.extra) {
           const fitted = extraRow(
             item.name,
             item.state,
             selected ? "›" : " ",
-            roomy ? listWidth : Math.max(0, w - 2),
+            roomy ? listWidth : inner,
           );
           if (roomy) listLines.push(...fitted.lines);
           else {
-            for (const text of fitted.lines) lines.push(line(text));
+            for (const text of fitted.lines)
+              body.push(this.focus(line(text), selected, item.state));
             if (!fitted.yieldRest) {
-              lines.push(this.theme.fg("muted", line(`  ${item.description}`)));
+              body.push(
+                this.theme.fg("muted", line(`  ${plain(item.description)}`)),
+              );
               if (item.metadata)
-                lines.push(this.theme.fg("muted", line(`  ${item.metadata}`)));
+                body.push(
+                  this.theme.fg("muted", line(`  ${plain(item.metadata)}`)),
+                );
             }
           }
         } else if (this.section === "Community") {
           const status = `  ${item.state}${item.entry ? ` · ${item.entry.scope}` : ""}`;
           const name = truncateToWidth(
             plain(item.name),
-            Math.max(1, w - 4 - visibleWidth(status)),
+            Math.max(1, inner - 2 - visibleWidth(status)),
           );
-          lines.push(line(`${selected ? "›" : " "} ${name}${status}`));
+          body.push(
+            this.focus(
+              line(`${selected ? "›" : " "} ${name}${status}`),
+              selected,
+              item.state,
+            ),
+          );
           const latest = item.remote?.version
             ? ` · latest ${plain(item.remote.version)}`
             : "";
-          lines.push(line(`  unverified${latest}  ${plain(item.description)}`));
-        } else {
-          lines.push(
-            line(`${selected ? "›" : " "} ${item.name}  ${item.state}`),
+          body.push(
+            this.theme.fg(
+              "muted",
+              line(`  unverified${latest}  ${plain(item.description)}`),
+            ),
           );
-          lines.push(this.theme.fg("muted", line(`  ${item.description}`)));
+        } else {
+          const status = `  ${plain(item.state)}`;
+          const name = truncateToWidth(
+            plain(item.name),
+            Math.max(1, inner - 2 - visibleWidth(status)),
+          );
+          body.push(
+            this.focus(
+              line(`${selected ? "›" : " "} ${name}${status}`),
+              selected,
+              item.state,
+            ),
+          );
+          if (this.section !== "Settings")
+            body.push(
+              this.theme.fg("muted", line(`  ${plain(item.description)}`)),
+            );
           if (item.metadata)
-            lines.push(this.theme.fg("muted", line(`  ${item.metadata}`)));
+            body.push(
+              this.theme.fg("muted", line(`  ${plain(item.metadata)}`)),
+            );
         }
       }
       if (roomy && current) {
@@ -576,52 +638,104 @@ export class ManagerPopup implements Component {
             ]
           : preview(current);
         const count = Math.min(
-          visible,
+          bodySize - 1,
           Math.max(listLines.length, side.length),
         );
         for (let i = 0; i < count; i++)
-          lines.push(
-            truncateToWidth(listLines[i] ?? "", listWidth, "", true) +
+          body.push(
+            this.focus(
+              truncateToWidth(listLines[i] ?? "", listWidth, "", true),
+              start + i === this.selected,
+              rows[start + i]?.state ?? "",
+            ) +
               gutter +
               truncateToWidth(side[i] ?? "", pane, "", true),
           );
+        if (side.length > count)
+          body.push(this.theme.fg("muted", line("Enter details for more ↓")));
       }
       if (rows.length > visible)
-        lines.push(line(`${this.selected + 1}/${rows.length}`));
+        body.push(
+          this.theme.fg(
+            "muted",
+            line(`${this.selected + 1}/${rows.length} · ↑↓ more`),
+          ),
+        );
     }
-    if (this.remoteError && rows.length)
-      lines.push(line(`Registry: ${this.remoteError}`));
-    else if (this.loading && rows.length)
-      lines.push(line("Refreshing npm metadata…"));
+    const footer = this.details
+      ? `Esc back · ↑↓ scroll ${this.detailOffset + 1}/${this.detailLimit + bodySize}`
+      : rows.length > 1
+        ? footerRows === 1
+          ? `Esc close · ↑↓ ${this.selected + 1}/${rows.length}`
+          : `Esc close · Tab sections · ↑↓ select · Enter details · ${this.selected + 1}/${rows.length}`
+        : "Esc close · Tab sections · Enter details";
+    const actions =
+      this.section === "Settings"
+        ? "Space/Enter toggle setting · Esc close"
+        : this.section === "Extras"
+          ? "Enter category/details · f filter type · Space toggle · i install/select · x deselect · Esc back"
+          : this.section === "Community"
+            ? "i install · Enter details · e/d toggle · x remove · r refresh registry · Esc close"
+            : this.section === "Updates"
+              ? "u update · U update all · r refresh registry · Esc close"
+              : "i install · e enable · d disable · Space toggle · x remove · u update · r refresh · Esc close";
+    lines.push(...body.slice(0, bodySize));
+    while (lines.length < height - 2 - footerRows) lines.push("");
+    const registry =
+      rows.length && (this.remoteError || this.loading)
+        ? this.remoteError
+          ? this.theme.fg("error", `Registry: ${plain(this.remoteError)}`)
+          : this.theme.fg("muted", "Refreshing npm metadata…")
+        : undefined;
+    if (footerRows === 2)
+      lines.push(
+        registry ? line(registry) : this.theme.fg("muted", line(actions)),
+      );
     lines.push(
-      "",
-      this.theme.fg(
-        "muted",
-        line("Tab sections · ↑↓ select · Enter details · / search"),
-      ),
       this.theme.fg(
         "muted",
         line(
-          this.section === "Settings"
-            ? "Space/Enter toggle setting · Esc close"
-            : this.section === "Extras"
-              ? "Enter category/details · f filter type · Space toggle · i install/select · x deselect · Esc back"
-              : this.section === "Community"
-                ? "i install · Enter details · e/d toggle · x remove · r refresh registry · Esc close"
-                : this.section === "Updates"
-                  ? "u update · U update all · r refresh registry · Esc close"
-                  : "i install · e enable · d disable · Space toggle · x remove · u update · r refresh · Esc close",
+          registry && footerRows === 1
+            ? rows.length > 1
+              ? `Esc · ↑↓ ${this.selected + 1}/${rows.length} · Registry!`
+              : `Esc · ${registry}`
+            : footer,
         ),
       ),
     );
-    if (w < 4) return lines.map((s) => truncateToWidth(s, w));
-    const inner = w - 2;
-    const border = this.theme.fg("border", "─".repeat(inner));
+    return this.frame(lines, w, height);
+  }
+
+  private focus(text: string, selected: boolean, state: string): string {
+    const role =
+      state === "enabled"
+        ? "success"
+        : state === "missing"
+          ? "error"
+          : state === "custom" || state === "shadowed"
+            ? "warning"
+            : state === "disabled" || state === "not installed"
+              ? "muted"
+              : "text";
+    const styled = this.theme.fg(role, text);
+    return selected
+      ? (this.theme.bg?.("selectedBg", styled) ?? styled)
+      : styled;
+  }
+
+  private frame(lines: string[], width: number, height: number): string[] {
+    if (width < 4 || height < 3)
+      return Array.from({ length: height }, (_, i) =>
+        truncateToWidth(lines[i] ?? "Esc", width, "", true),
+      );
+    const border = this.theme.fg("border", "─".repeat(width - 2));
+    const content = lines.slice(0, height - 2);
+    while (content.length < height - 2) content.push("");
     return [
       `${this.theme.fg("border", "╭")}${border}${this.theme.fg("border", "╮")}`,
-      ...lines.map((text) => {
-        const content = truncateToWidth(text, inner);
-        return `${this.theme.fg("border", "│")}${content}${" ".repeat(Math.max(0, inner - visibleWidth(content)))}${this.theme.fg("border", "│")}`;
+      ...content.map((text) => {
+        const fitted = truncateToWidth(text, width - 4, "", true);
+        return `${this.theme.fg("border", "│")} ${fitted} ${this.theme.fg("border", "│")}`;
       }),
       `${this.theme.fg("border", "╰")}${border}${this.theme.fg("border", "╯")}`,
     ];
@@ -629,10 +743,14 @@ export class ManagerPopup implements Component {
 
   handleInput(data: string): void {
     const rows = this.rows();
-    const shortcut =
+    const shortcut: Section | undefined =
       data === "I"
         ? "Packages"
-        : sections.find((section) => sectionShortcuts[section] === data);
+        : data === "E"
+          ? "Enabled"
+          : data === "D"
+            ? "Disabled"
+            : sections.find((section) => sectionShortcuts[section] === data);
     if (matchesKey(data, Key.escape)) {
       if (this.details) this.details = false;
       else if (this.section === "Extras" && this.category) {
@@ -649,25 +767,34 @@ export class ManagerPopup implements Component {
       matchesKey(data, Key.shift("tab"))
     ) {
       const delta = matchesKey(data, Key.tab) ? 1 : -1;
-      const tabs: readonly Section[] = sections;
+      const index = sections.indexOf(
+        this.section === "Enabled" || this.section === "Disabled"
+          ? "Packages"
+          : this.section,
+      );
       const next =
         shortcut ??
-        tabs[
-          (tabs.indexOf(this.section) + delta + tabs.length) % tabs.length
-        ] ??
-        tabs[0]!;
+        sections[(index + delta + sections.length) % sections.length]!;
       if (next !== this.section) this.query = "";
       this.section = next;
       this.selected = 0;
       this.details = false;
+      this.detailOffset = 0;
       if (this.section === "Community" || this.section === "Updates")
         this.done({ action: "refresh" });
       else this.tui.requestRender();
     } else if (matchesKey(data, Key.down) || data === "j") {
-      this.selected = Math.min(rows.length - 1, this.selected + 1);
+      if (this.details)
+        this.detailOffset = Math.min(this.detailLimit, this.detailOffset + 1);
+      else
+        this.selected = Math.min(
+          Math.max(0, rows.length - 1),
+          this.selected + 1,
+        );
       this.tui.requestRender();
     } else if (matchesKey(data, Key.up) || data === "k") {
-      this.selected = Math.max(0, this.selected - 1);
+      if (this.details) this.detailOffset = Math.max(0, this.detailOffset - 1);
+      else this.selected = Math.max(0, this.selected - 1);
       this.tui.requestRender();
     } else if (
       this.section === "Settings" &&
@@ -719,6 +846,7 @@ export class ManagerPopup implements Component {
         this.selected = 0;
       } else {
         this.details = !this.details;
+        this.detailOffset = 0;
         if (this.details && row?.remote && this.loadDetails) {
           void this.loadDetails(row.remote.name)
             .then((pkg) => {

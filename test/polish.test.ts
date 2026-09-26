@@ -185,11 +185,16 @@ test("Settings has only the update switch; Community remains in tab navigation",
     /Auto-check updates at startup.*on/,
   );
   assert.doesNotMatch(popup.render(76).join("\n"), /Show Community tab/);
-  assert.match(popup.render(76).join("\n"), /Community \(M\)/);
+  assert.match(
+    popup.render(76).join("\n"),
+    /Packages.*Core.*Extras.*Community.*Updates.*Settings/,
+  );
   popup.handleInput(" ");
   popup.handleInput("\t");
   assert.equal(popup.section, "Packages");
   assert.deepEqual(choices, ["autoCheckUpdates:false"]);
+  popup.handleInput("M");
+  assert.equal(popup.section, "Community");
   const updates = new ManagerPopup(
     tui,
     theme,
@@ -252,7 +257,10 @@ test("Settings switch persists without remounting; old Community preference is i
       },
     } as unknown as ExtensionCommandContext);
     assert.equal(openings, 1, "a toggle must not remount the overlay");
-    assert.match(frames[0]!, /Community \(M\)/);
+    assert.match(
+      frames[0]!,
+      /Packages.*Core.*Extras.*Community.*Updates.*Settings/,
+    );
     assert.doesNotMatch(frames[0]!, /Show Community tab/);
     assert.match(frames[1]!, /Auto-check updates at startup.*on/);
     assert.match(frames[2]!, /Auto-check updates at startup.*off/);

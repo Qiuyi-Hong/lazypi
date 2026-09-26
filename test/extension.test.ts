@@ -393,7 +393,15 @@ test("/lazypi and /lazypi installed open the same Pi inventory", async () => {
       ui: {
         custom: async (
           factory: Parameters<ExtensionCommandContext["ui"]["custom"]>[0],
+          options: Parameters<ExtensionCommandContext["ui"]["custom"]>[1],
         ) => {
+          assert.equal(options?.overlay, true);
+          assert.deepEqual(options?.overlayOptions, {
+            anchor: "center",
+            width: 120,
+            maxHeight: 26,
+            margin: 1,
+          });
           const popup = factory(
             { requestRender: () => {}, terminal: { rows: 24 } } as TUI,
             { fg: (_color: string, text: string) => text } as Theme,
@@ -401,7 +409,9 @@ test("/lazypi and /lazypi installed open the same Pi inventory", async () => {
             () => {},
           ) as ManagerPopup;
           assert.equal(popup.section, "Packages");
-          frames.push(popup.render(76).join("\n"));
+          const rendered = popup.render(78);
+          assert.equal(rendered.length, 22);
+          frames.push(rendered.join("\n"));
           return { action: "close" };
         },
         notify: (message: string) => notifications.push(message),

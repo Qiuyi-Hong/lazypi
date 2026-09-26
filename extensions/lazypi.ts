@@ -410,7 +410,12 @@ export default function (pi: ExtensionAPI) {
             },
             {
               overlay: true,
-              overlayOptions: { anchor: "center", width: 120, maxHeight: 26 },
+              overlayOptions: {
+                anchor: "center",
+                width: 120,
+                maxHeight: 26,
+                margin: 1,
+              },
             },
           );
           open = false;

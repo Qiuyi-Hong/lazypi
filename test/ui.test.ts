@@ -8,6 +8,249 @@ import { ManagerPopup, type Choice } from "../src/ui.ts";
 const theme = { fg: (_color: string, text: string) => text } as Theme;
 const tui = { requestRender: () => {}, terminal: { rows: 24 } } as TUI;
 
+test("popup frame stays fixed across views and reflows to the terminal", () => {
+  const entries = Array.from({ length: 30 }, (_, n) => ({
+    source: `npm:entry-${n}`,
+    scope: "user" as const,
+    state: "enabled" as const,
+    name: `entry-${n}`,
+    resources: [],
+  }));
+  for (const [columns, rows] of [
+    [122, 30],
+    [80, 24],
+    [48, 12],
+    [32, 8],
+  ]) {
+    const terminal = { requestRender: () => {}, terminal: { rows } } as TUI;
+    const ui = new ManagerPopup(terminal, theme, () => {}, entries, "Packages");
+    const check = () => {
+      const frame = ui.render(columns - 2);
+      assert.equal(frame.length, Math.min(26, rows - 2));
+      for (const line of frame)
+        assert.equal(visibleWidth(line), Math.min(120, columns - 2));
+      assert.match(frame[0]!, /╭.*╮/);
+      assert.match(frame.at(-1)!, /╰.*╯/);
+      assert.match(frame.at(-2)!, /Esc/);
+    };
+    check();
+    if (rows === 8) assert.match(ui.render(columns - 2).at(-2)!, /↑↓.*1\/30/);
+    ui.handleInput("D");
+    check();
+    ui.handleInput("C");
+    check();
+    ui.handleInput("X");
+    check();
+    ui.handleInput("M");
+    check();
+    ui.setRemote([], new Map(), false, "registry failed");
+    check();
+    ui.handleInput("S");
+    check();
+    ui.handleInput("P");
+    ui.handleInput("\r");
+    check();
+  }
+  const tiny = new ManagerPopup(
+    { requestRender: () => {}, terminal: { rows: 4 } } as TUI,
+    theme,
+    () => {},
+    entries,
+    "Packages",
+  );
+  assert.match(tiny.render(12).join("\n"), /resize|Esc/i);
+});
+
+test("short registry errors leave the selected row and exit visible", () => {
+  const short = { requestRender: () => {}, terminal: { rows: 8 } } as TUI;
+  const ui = new ManagerPopup(
+    short,
+    theme,
+    () => {},
+    [],
+    "Community",
+    "",
+    [],
+    undefined,
+    "all",
+    {
+      community: [
+        {
+          source: "npm:example",
+          name: "example",
+          description: "Example",
+          version: "1.0.0",
+          resources: [],
+        },
+      ],
+      error: "offline",
+    },
+  );
+  const frame = ui.render(30).join("\n");
+  assert.match(frame, /› example.*not installed/);
+  assert.match(frame, /Esc · Registry: offline/);
+  assert.match(frame, /╰.*╯/);
+  ui.setRemote(
+    [
+      {
+        source: "npm:example",
+        name: "example",
+        description: "Example",
+        version: "1.0.0",
+        resources: [],
+      },
+      {
+        source: "npm:other",
+        name: "other",
+        description: "Other",
+        version: "1.0.0",
+        resources: [],
+      },
+    ],
+    new Map(),
+    false,
+    "offline",
+  );
+  assert.match(ui.render(30).at(-2)!, /↑↓ 1\/2 · Registry!/);
+});
+
+test("detail scrolling reveals wrapped fields without changing selection or frame", () => {
+  const rows = [
+    {
+      source: "npm:wide",
+      name: "包-kit",
+      scope: "user" as const,
+      state: "enabled" as const,
+      description: "long ".repeat(50),
+      error: "manifest error: " + "bad ".repeat(40),
+      resources: [],
+    },
+    {
+      source: "npm:next",
+      name: "next",
+      scope: "project" as const,
+      state: "disabled" as const,
+      resources: [],
+    },
+  ];
+  const terminal = { requestRender: () => {}, terminal: { rows: 12 } };
+  const ui = new ManagerPopup(
+    terminal as TUI,
+    theme,
+    () => {},
+    rows,
+    "Packages",
+  );
+  ui.handleInput("j");
+  ui.handleInput("k");
+  ui.handleInput("\r");
+  let frame = ui.render(46);
+  assert.equal(frame.length, 10);
+  assert.doesNotMatch(frame.join("\n"), /manifest error/);
+  for (
+    let n = 0;
+    n < 100 && !ui.render(46).join("\n").includes("manifest error");
+    n++
+  )
+    ui.handleInput("j");
+  frame = ui.render(46);
+  assert.match(frame.join("\n"), /manifest error/);
+  assert.match(frame.at(-2)!, /Esc back.*scroll/);
+  assert.equal(frame.length, 10);
+  terminal.terminal.rows = 24;
+  assert.equal(ui.render(78).length, 22);
+  terminal.terminal.rows = 12;
+  assert.equal(ui.render(46).length, 10);
+  ui.handleInput("\u001b");
+  assert.match(ui.render(46).join("\n"), /› 包-kit/);
+  ui.handleInput("j");
+  assert.match(ui.render(46).join("\n"), /› next/);
+});
+
+test("semantic colors and selected background keep written status and width safe", () => {
+  const colors = new Set<string>();
+  const palette = {
+    fg: (role: string, text: string) => {
+      colors.add(role);
+      return `\x1b[32m${text}\x1b[0m`;
+    },
+    bg: (role: string, text: string) => {
+      colors.add(role);
+      return `\x1b[44m${text}\x1b[0m`;
+    },
+  } as Theme;
+  const ui = new ManagerPopup(
+    tui,
+    palette,
+    () => {},
+    [
+      {
+        source: "npm:包",
+        name: "包-kit",
+        scope: "user",
+        state: "enabled",
+        resources: [],
+      },
+      {
+        source: "npm:missing",
+        name: "missing",
+        scope: "project",
+        state: "missing",
+        resources: [],
+      },
+    ],
+    "Packages",
+  );
+  for (const line of ui.render(48)) assert.equal(visibleWidth(line), 48);
+  ui.handleInput("j");
+  assert.match(ui.render(48).join("\n"), /missing · project/);
+  for (const role of [
+    "accent",
+    "border",
+    "muted",
+    "selectedBg",
+    "success",
+    "error",
+  ])
+    assert.ok(colors.has(role), role);
+});
+
+test("navigation has six destinations and Packages filters; Settings rows have values", () => {
+  const ui = new ManagerPopup(tui, theme, () => {}, [], "Packages");
+  assert.match(
+    ui.render(120).join("\n"),
+    /Packages.*Core.*Extras.*Community.*Updates.*Settings/,
+  );
+  assert.doesNotMatch(
+    ui.render(120).join("\n"),
+    /Enabled \(E\).*Disabled \(D\)/,
+  );
+  ui.handleInput("E");
+  assert.match(ui.render(120).join("\n"), /Packages.*Enabled/);
+  const short = new ManagerPopup(
+    { requestRender: () => {}, terminal: { rows: 8 } } as TUI,
+    theme,
+    () => {},
+    [],
+    "Enabled",
+  );
+  assert.match(short.render(30).join("\n"), /Packages.*Enabled.*Tab/);
+  ui.handleInput("\t");
+  assert.equal(ui.section, "Core");
+  ui.handleInput("S");
+  assert.match(ui.render(120).join("\n"), /Auto-check updates at startup.*off/);
+  assert.doesNotMatch(ui.render(120).join("\n"), /Scope:.*off/);
+  assert.match(ui.render(30).join("\n"), /Settings.*Tab/);
+  const shortSetting = new ManagerPopup(
+    { requestRender: () => {}, terminal: { rows: 8 } } as TUI,
+    theme,
+    () => {},
+    [],
+    "Settings",
+  );
+  assert.match(shortSetting.render(30).join("\n"), /› Auto-check.*off/);
+});
+
 test("popup renders within narrow terminal widths and supports section navigation", () => {
   const choices: Choice[] = [];
   const ui = new ManagerPopup(
@@ -26,9 +269,9 @@ test("popup renders within narrow terminal widths and supports section navigatio
     "Packages",
   );
   for (const line of ui.render(32)) assert.ok(visibleWidth(line) <= 32);
-  ui.handleInput("\t");
+  ui.handleInput("E");
   assert.equal(ui.section, "Enabled");
-  ui.handleInput("\t");
+  ui.handleInput("D");
   assert.equal(ui.section, "Disabled");
   ui.handleInput(" ");
   ui.handleInput("\t");
@@ -73,8 +316,6 @@ test("uppercase keys jump to every section without replacing existing actions", 
   );
   for (const [name, key] of [
     ["Packages", "P"],
-    ["Enabled", "E"],
-    ["Disabled", "D"],
     ["Core", "C"],
     ["Extras", "X"],
     ["Community", "M"],
@@ -82,7 +323,7 @@ test("uppercase keys jump to every section without replacing existing actions", 
     ["Settings", "S"],
   ] as const)
     assert.match(header, new RegExp(`${name} \\(${key}\\)`));
-  assert.doesNotMatch(ui.render(76).join("\n"), /Tab or I E D C X M T S/);
+  assert.doesNotMatch(ui.render(76).join("\n"), /Enabled \(E\)|Disabled \(D\)/);
   for (const [key, section] of [
     ["E", "Enabled"],
     ["D", "Disabled"],
@@ -216,6 +457,41 @@ test("Packages keeps Pi scope and state visible across long inventories and emit
   for (let n = 0; n < entries.length - 1; n++) short.handleInput("j");
   assert.ok(short.render(76).length <= 16);
   assert.match(short.render(76).join("\n"), /› last\s+disabled · project/);
+});
+
+test("short Extras keep selection and installation readable", () => {
+  const short = { requestRender: () => {}, terminal: { rows: 8 } } as TUI;
+  const ui = new ManagerPopup(
+    short,
+    theme,
+    () => {},
+    [],
+    "Extras",
+    "research-workflow",
+    [{ id: "research-workflow", scope: "user" }],
+    "web-research",
+  );
+  assert.match(ui.render(30).join("\n"), /selected · not installed/);
+  const partial = new ManagerPopup(
+    short,
+    theme,
+    () => {},
+    [
+      {
+        source: "npm:pi-subagents",
+        scope: "user",
+        state: "enabled",
+        name: "pi-subagents",
+        path: "/installed",
+        resources: [],
+      },
+    ],
+    "Extras",
+    "research-workflow",
+    [{ id: "research-workflow", scope: "user" }],
+    "web-research",
+  );
+  assert.match(partial.render(30).join("\n"), /selected · partial install/);
 });
 
 test("Extras show Pi installation independently of selection, including incomplete workflows", () => {
