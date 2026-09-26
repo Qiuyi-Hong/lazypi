@@ -29,6 +29,83 @@ test("npm extension entrypoint registers the /lazypi command without side effect
   assert.deepEqual(registered, ["lazypi"]);
 });
 
+test("switching sections clears search across popup reopen and search prompts", async () => {
+  const root = mkdtempSync(join(tmpdir(), "lazypi-search-command-"));
+  const agent = join(root, "agent");
+  markSetupComplete(agent);
+  const previousDir = process.env.PI_CODING_AGENT_DIR;
+  const previousOffline = process.env.PI_OFFLINE;
+  process.env.PI_CODING_AGENT_DIR = agent;
+  process.env.PI_OFFLINE = "1";
+  try {
+    let handler!: RegisteredCommand["handler"];
+    extension({
+      on: () => {},
+      registerCommand: (
+        _name: string,
+        command: { handler: RegisteredCommand["handler"] },
+      ) => {
+        handler = command.handler;
+      },
+    } as unknown as Parameters<typeof extension>[0]);
+    let openings = 0;
+    let prompts = 0;
+    const errors: string[] = [];
+    await handler("extras", {
+      mode: "tui",
+      cwd: root,
+      isProjectTrusted: () => false,
+      ui: {
+        custom: async (
+          factory: Parameters<ExtensionCommandContext["ui"]["custom"]>[0],
+        ) =>
+          new Promise((done) => {
+            const popup = factory(
+              { requestRender: () => {}, terminal: { rows: 24 } } as TUI,
+              { fg: (_color: string, text: string) => text } as Theme,
+              {} as Parameters<typeof factory>[2],
+              done,
+            ) as ManagerPopup;
+            switch (openings++) {
+              case 0:
+                popup.handleInput("/");
+                break;
+              case 1:
+                assert.match(popup.render(76).join("\n"), /Search: yagni/);
+                popup.handleInput("P");
+                popup.handleInput("M"); // Remote sections recreate the popup.
+                break;
+              case 2:
+                assert.equal(popup.section, "Community");
+                assert.match(
+                  popup.render(76).join("\n"),
+                  /Search: \(press \/\)/,
+                );
+                popup.handleInput("/");
+                break;
+              default:
+                popup.handleInput("\u001b");
+            }
+          }),
+        input: async (_title: string, value: string) => {
+          if (prompts++ === 0) return "yagni";
+          assert.equal(value, "");
+          return undefined;
+        },
+        notify: (message: string) => errors.push(message),
+      },
+    } as unknown as ExtensionCommandContext);
+    assert.deepEqual(errors, []);
+    assert.equal(openings, 4);
+    assert.equal(prompts, 2);
+  } finally {
+    if (previousDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previousDir;
+    if (previousOffline === undefined) delete process.env.PI_OFFLINE;
+    else process.env.PI_OFFLINE = previousOffline;
+  }
+});
+
 test("/lazypi extras plans project selections and deselection without uninstalling adopted packages", async () => {
   const root = mkdtempSync(join(tmpdir(), "lazypi-extras-command-"));
   const agent = join(root, "agent");

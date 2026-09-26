@@ -440,6 +440,7 @@ export default function (pi: ExtensionAPI) {
           open = false;
           const previous = active;
           active = popup.section;
+          query = popup.query;
           category = popup.category;
           resourceType = popup.resourceType;
           if (choice.action === "close") return;

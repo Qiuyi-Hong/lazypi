@@ -128,7 +128,7 @@ export class ManagerPopup implements Component {
   private items: PackageEntry[];
   private selections: Selection[];
   public section: Section;
-  private query: string;
+  public query: string;
   public category?: ExtraCategory;
   public resourceType: PiResourceType | "all";
   private community: RemotePackage[];
@@ -650,12 +650,14 @@ export class ManagerPopup implements Component {
     ) {
       const delta = matchesKey(data, Key.tab) ? 1 : -1;
       const tabs: readonly Section[] = sections;
-      this.section =
+      const next =
         shortcut ??
         tabs[
           (tabs.indexOf(this.section) + delta + tabs.length) % tabs.length
         ] ??
         tabs[0]!;
+      if (next !== this.section) this.query = "";
+      this.section = next;
       this.selected = 0;
       this.details = false;
       if (this.section === "Community" || this.section === "Updates")
