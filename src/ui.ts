@@ -330,6 +330,60 @@ export class ManagerPopup implements Component {
     ];
   }
 
+  private detailStatus(name: string, searchVersion?: string): string {
+    const cached = this.cachedDetails?.(name);
+    if (
+      cached &&
+      this.detailsByName.get(name)?.version !== undefined &&
+      this.detailsByName.get(name)?.version !== cached.value.version
+    )
+      return "loaded (cache timestamp unknown)";
+    if (cached)
+      return `cached at ${new Date(cached.timestamp).toLocaleString()}${searchVersion && cached.value.version !== searchVersion ? " (older than npm search)" : ""}${this.offline ? " (offline)" : this.remoteError ? " (stale; refresh failed)" : this.loading ? " (refreshing)" : ""}`;
+    if (this.detailsByName.has(name)) return "loaded";
+    return this.offline
+      ? "offline—not cached"
+      : this.remoteError
+        ? "not loaded (refresh failed)"
+        : "not loaded";
+  }
+
+  private updatesEmptyState(): string {
+    if (this.query) return "No matching updates.";
+    if (
+      !this.items.some(
+        (item) => item.path && item.version && item.source.startsWith("npm:"),
+      )
+    )
+      return "No eligible installed npm packages to check.";
+    if (this.remoteError && !this.offline)
+      return `No known updates · ${plain(this.remoteError)}${this.versions.size ? " (cached hints may be stale)" : " · npm latest unknown"}`;
+    if (!this.versions.size)
+      return this.offline
+        ? "No known updates · offline—not cached"
+        : "No known updates · npm latest not loaded";
+    return `No newer npm versions in cached metadata.${this.offline ? " Offline." : ""}`;
+  }
+
+  private updatesFacts(row: Row): string[] {
+    const entry = row.entry!; // Update rows are built only from installed Pi inventory.
+    const npm = this.detailsByName.get(row.remote!.name) ?? row.remote!;
+    const loaded =
+      this.detailsByName.has(npm.name) || !!this.cachedDetails?.(npm.name);
+    return [
+      row.name,
+      `Source: ${entry.source}`,
+      `Pi scope: ${entry.scope} · Pi state: ${entry.state}`,
+      `Pi installed version: ${entry.version ?? "unknown"}`,
+      `Pi description: ${entry.description ?? (entry.error ? "unknown" : "not provided locally")}`,
+      `Pi resources: ${entry.error ? "unknown" : entry.resources.join(", ") || "none detected"}`,
+      `npm latest: ${npm.version} (registry hint; not installed)`,
+      `Details: ${this.detailStatus(npm.name)}`,
+      `npm description (publisher-supplied): ${npm.description || (loaded ? "not provided" : "unknown")}`,
+      ...(entry.error ? [entry.error] : []),
+    ].map(plain);
+  }
+
   private communityFacts(row: Row): string[] {
     const e = row.entry;
     const search = row.remote!; // Community rows always originate from a registry result.
@@ -343,15 +397,6 @@ export class ManagerPopup implements Component {
     const peers = this.items.filter(
       (item) => identity(item.source) === row.source,
     );
-    const status = cached
-      ? `cached at ${new Date(cached.timestamp).toLocaleString()}${cached.value.version !== search.version ? " (older than npm search)" : ""}${this.remoteError ? " (stale; refresh failed)" : ""}`
-      : fetched
-        ? "loaded"
-        : this.offline
-          ? "offline—not cached"
-          : this.remoteError
-            ? "not loaded (refresh failed)"
-            : "not loaded";
     return [
       row.name,
       "unverified",
@@ -364,7 +409,7 @@ export class ManagerPopup implements Component {
       `Pi description: ${e?.description ?? localAbsent}`,
       `Pi repository: ${e?.repository ?? localAbsent}`,
       `Pi author: ${e?.author ?? localAbsent}`,
-      `Details: ${status}`,
+      `Details: ${this.detailStatus(search.name, search.version)}`,
       ...(this.searchTimestamp === undefined
         ? []
         : [`Search cache: ${new Date(this.searchTimestamp).toLocaleString()}`]),
@@ -476,10 +521,13 @@ export class ManagerPopup implements Component {
                   .map((entry) => ({
                     name: entry.name,
                     description: `${entry.source} · ${entry.scope} · ${entry.state}`,
-                    state: `${entry.version} → ${this.versions.get(identity(entry.source))!.version}`,
+                    state: entry.state,
                     entry,
                     source: entry.source,
-                    remote: this.versions.get(identity(entry.source)),
+                    remote:
+                      this.detailsByName.get(
+                        this.versions.get(identity(entry.source))!.name,
+                      ) ?? this.versions.get(identity(entry.source)),
                   }))
               : this.section === "Core"
                 ? core.map((spec) => {
@@ -595,12 +643,19 @@ export class ManagerPopup implements Component {
           ? localDetails(e, this.items, this.selections)
           : this.section === "Community"
             ? this.communityFacts(current)
-            : [];
+            : this.section === "Updates"
+              ? this.updatesFacts(current)
+              : [];
       const remote =
         !local &&
         current.remote &&
         (this.detailsByName.get(current.remote.name) ?? current.remote);
-      if (!local && !current.core && this.section !== "Community") {
+      if (
+        !local &&
+        !current.core &&
+        this.section !== "Community" &&
+        this.section !== "Updates"
+      ) {
         detail.push(plain(current.name));
         if (!current.extra)
           detail.push(
@@ -653,7 +708,9 @@ export class ManagerPopup implements Component {
         line(
           this.loading
             ? "Loading npm metadata…"
-            : (this.remoteError ?? "No packages in this view."),
+            : this.section === "Updates"
+              ? this.updatesEmptyState()
+              : (this.remoteError ?? "No packages in this view."),
         ),
       );
     else {
@@ -762,6 +819,30 @@ export class ManagerPopup implements Component {
                 );
             }
           }
+        } else if (this.section === "Updates") {
+          const version = `  Pi installed ${plain(item.entry!.version ?? "unknown")}`;
+          const fullStatus = `${version} · ${item.entry!.scope} · ${item.entry!.state}`;
+          const status =
+            visibleWidth(plain(item.name) + fullStatus) + 2 > inner
+              ? version
+              : fullStatus;
+          const name = truncateToWidth(
+            plain(item.name),
+            Math.max(1, inner - 2 - visibleWidth(status)),
+          );
+          body.push(
+            this.focus(
+              line(`${selected ? "›" : " "} ${name}${status}`),
+              selected,
+              item.state,
+            ),
+            this.theme.fg(
+              "muted",
+              line(
+                `  npm latest ${plain(item.remote!.version)} · ${this.detailStatus(item.remote!.name)}`,
+              ),
+            ),
+          );
         } else if (this.section === "Community") {
           const status = `  ${item.state}${item.entry ? ` · ${item.entry.scope}` : ""}`;
           const name = truncateToWidth(
@@ -1080,6 +1161,10 @@ export class ManagerPopup implements Component {
                   ...pkg,
                   published: pkg.published || row.remote!.published,
                 });
+                if (this.section === "Updates" && row.entry) {
+                  this.versions.set(identity(row.entry.source), pkg);
+                  if (!updateFor(row.entry, pkg)) this.details = false;
+                }
                 this.tui.requestRender();
               })
               .catch((error: unknown) => {
