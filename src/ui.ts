@@ -370,8 +370,7 @@ export class ManagerPopup implements Component {
     });
     const lines = [
       this.theme.fg("accent", line("LazyPi · native Pi packages")),
-      line(header.slice(0, 4).join(" ")),
-      line(header.slice(4).join(" ")),
+      line(header.join(" ")),
       line(
         this.section === "Extras"
           ? `Extras${this.category ? ` / ${EXTRA_CATEGORIES[this.category]}` : ""} · Type: ${this.resourceType === "all" ? "All" : `${this.resourceType}s`}`

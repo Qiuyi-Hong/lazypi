@@ -55,7 +55,12 @@ test("uppercase keys jump to every section without replacing existing actions", 
     [],
     "Packages",
   );
-  const header = ui.render(76).slice(2, 4).join("\n");
+  const header = ui.render(120).find((line) => line.includes("Packages (P)"));
+  assert.ok(header);
+  assert.equal(
+    ui.render(120).filter((line) => /Settings \(S\)/.test(line)).length,
+    1,
+  );
   for (const [name, key] of [
     ["Packages", "P"],
     ["Enabled", "E"],
@@ -98,7 +103,7 @@ test("uppercase keys jump to every section without replacing existing actions", 
     [],
     "Extras",
   );
-  assert.match(tabs.render(76).join("\n"), /Community \(M\)/);
+  assert.match(tabs.render(120).join("\n"), /Community \(M\)/);
   tabs.handleInput("\t");
   assert.equal(tabs.section, "Community");
   assert.equal(choices.at(-1)?.action, "refresh");
