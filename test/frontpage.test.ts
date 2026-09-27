@@ -325,7 +325,7 @@ test("header factory reflows on resize and uses active theme roles without a bac
   }
 });
 
-test("startup header centers the wordmark and details without hiding the prompt on short terminals", () => {
+test("startup header keeps the wordmark and details near the top without hiding the prompt on short terminals", () => {
   const root = mkdtempSync(join(tmpdir(), "lazypi-centered-"));
   const previous = process.env.PI_CODING_AGENT_DIR;
   process.env.PI_CODING_AGENT_DIR = root;
@@ -357,8 +357,7 @@ test("startup header centers the wordmark and details without hiding the prompt 
     const border = wide.findIndex((line) => line.includes("╭"));
     assert.equal(wide[first]!.indexOf("█"), Math.floor((160 - 79) / 2));
     assert.equal(wide[border]!.indexOf("╭"), (160 - 112) / 2);
-    assert.ok(first > 0, "logo is vertically centered on tall screens");
-    assert.ok(Math.abs(first + (wide.length - first) / 2 - 48 / 2) <= 1);
+    assert.equal(first, 2, "logo starts after two lines of top padding");
     assert.match(
       wide.join("\n"),
       /Model.*provider\/model-42[^\n]*\n.*Thinking effort.*high/,
@@ -366,6 +365,10 @@ test("startup header centers the wordmark and details without hiding the prompt 
 
     const narrow = component.render(40).map(stripTerminalSequences);
     assert.ok(narrow.every((line) => visibleWidth(line) <= 40));
+    assert.equal(
+      narrow.findIndex((line) => line.includes("LazyPi")),
+      2,
+    );
     assert.equal(
       narrow.find((line) => line.includes("LazyPi"))!.indexOf("LazyPi"),
       17,

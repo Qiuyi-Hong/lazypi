@@ -59,10 +59,7 @@ export default function (pi: ExtensionAPI) {
           );
           const top = Math.max(
             0,
-            Math.min(
-              Math.floor((tui.terminal.rows - lines.length) / 2),
-              tui.terminal.rows - lines.length - 6,
-            ),
+            Math.min(2, tui.terminal.rows - lines.length - 6),
           );
           return [...Array(top).fill(""), ...lines];
         } catch {
