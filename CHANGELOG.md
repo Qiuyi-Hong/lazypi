@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.6 (2026-09-27)
+
+### Changed
+
+- Redraw the startup LazyPi wordmark with cleaner, more symmetrical letters and improved centering across terminal widths.
+
 ## 0.2.5 (2026-09-27)
 
 ### Added
