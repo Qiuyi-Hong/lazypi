@@ -171,7 +171,7 @@ test("wide startup header renders a connected blue wordmark and a truthful two-c
             : text,
       } as Theme;
       const component = factory!(tui, activeTheme);
-      for (const width of [88, 96, 120, 160]) {
+      for (const width of [88, 89, 96, 97, 120, 121, 160, 161]) {
         const lines = component.render(width);
         assert.ok(
           lines.every((line) => visibleWidth(line) <= width),
@@ -195,10 +195,46 @@ test("wide startup header renders a connected blue wordmark and a truthful two-c
         const letterColumns = logo.flatMap((line) =>
           Array.from(line.matchAll(/█/g), (match) => match.index!),
         );
+        const wordmarkColumns = logo.flatMap((line) =>
+          Array.from(line.matchAll(/[█░]/g), (match) => match.index!),
+        );
+        assert.ok(
+          Math.abs(
+            Math.min(...wordmarkColumns) -
+              (width - 1 - Math.max(...wordmarkColumns)),
+          ) <= 1,
+          `wordmark without z marks is centered at width ${width}`,
+        );
         assert.equal(Math.min(...letterColumns), Math.floor((width - 60) / 2));
         assert.equal(
           Math.max(...letterColumns),
           Math.floor((width - 60) / 2) + 59,
+        );
+        const start = Math.floor((width - 60) / 2);
+        const glyph = (column: number) =>
+          logo
+            .slice(0, 6)
+            .map((line) =>
+              Array.from({ length: 10 }, (_, x) =>
+                line[start + column + x] === "█" ? "█" : " ",
+              ).join(""),
+            );
+        for (const [name, column] of [
+          ["A", 10],
+          ["Y", 30],
+          ["I", 50],
+        ] as const)
+          for (const row of glyph(column))
+            assert.equal(
+              row,
+              [...row].reverse().join(""),
+              `${name} mirrors horizontally`,
+            );
+        const z = glyph(20);
+        assert.deepEqual(
+          z,
+          z.map((row) => [...row].reverse().join("")).reverse(),
+          "Z rotates 180 degrees",
         );
         assert.ok(
           logo[logoStart + 5]?.trimStart().startsWith("█".repeat(14)),

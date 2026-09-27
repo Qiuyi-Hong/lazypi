@@ -9,14 +9,56 @@ import {
 } from "@earendil-works/pi-tui";
 import { plain } from "./ui.ts";
 
-// Five-cell letters share edges: the bottom stroke of L touches the A.
+// Ten-column letters share edges; even widths center the Y and I stems.
 const letters = [
-  ["██   ", "██   ", "██   ", "██   ", "██   ", "█████"],
-  [" ███ ", "██ ██", "█████", "██ ██", "██ ██", "██ ██"],
-  ["█████", "   ██", "  ██ ", " ██  ", "██   ", "█████"],
-  ["██ ██", "██ ██", " ███ ", "  ██ ", "  ██ ", "  ██ "],
-  ["████ ", "██ ██", "████ ", "██   ", "██   ", "██   "],
-  ["█████", "  ██ ", "  ██ ", "  ██ ", "  ██ ", "█████"],
+  [
+    "████      ",
+    "████      ",
+    "████      ",
+    "████      ",
+    "████      ",
+    "██████████",
+  ],
+  [
+    "  ██████  ",
+    "████  ████",
+    "██████████",
+    "████  ████",
+    "████  ████",
+    "████  ████",
+  ],
+  [
+    "██████████",
+    "      ████",
+    "    ████  ",
+    "  ████    ",
+    "████      ",
+    "██████████",
+  ],
+  [
+    "████  ████",
+    "████  ████",
+    "  ██████  ",
+    "   ████   ",
+    "   ████   ",
+    "   ████   ",
+  ],
+  [
+    "████████  ",
+    "████  ████",
+    "████████  ",
+    "████      ",
+    "████      ",
+    "████      ",
+  ],
+  [
+    "██████████",
+    "   ████   ",
+    "   ████   ",
+    "   ████   ",
+    "   ████   ",
+    "██████████",
+  ],
 ];
 
 function wordmark(theme: Theme, zShift: number): string[] {
@@ -28,8 +70,7 @@ function wordmark(theme: Theme, zShift: number): string[] {
     const row = letters.map((letter) => letter[y]).join("");
     for (let x = 0; x < row.length; x++) {
       if (row[x] !== "█") continue;
-      pixels[y]![x * 2] = "█";
-      pixels[y]![x * 2 + 1] = "█";
+      pixels[y]![x] = "█";
     }
   }
   // A one-cell offset traces the outside of the solid letters.
