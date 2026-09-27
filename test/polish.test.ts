@@ -134,6 +134,11 @@ test("settings persist atomically and reject malformed values", () => {
     () => writeLazyPiState(dir, { autoCheckUpdates: false }),
     /Invalid LazyPi state/,
   );
+  writeFileSync(
+    join(dir, "lazypi.json"),
+    JSON.stringify({ version: 1, showFrontpage: "no" }),
+  );
+  assert.throws(() => readLazyPiState(dir), /Invalid LazyPi state/);
 });
 
 test("health reports malformed Pi settings, missing packages and manifests without changing them", () => {
@@ -161,7 +166,7 @@ test("health reports malformed Pi settings, missing packages and manifests witho
 
 const theme = { fg: (_color: string, text: string) => text } as Theme;
 const tui = { requestRender: () => {}, terminal: { rows: 24 } } as TUI;
-test("Settings has only the update switch; Community remains in tab navigation", () => {
+test("Settings has independent update and frontpage switches; Community remains in tab navigation", () => {
   const choices: string[] = [];
   const popup = new ManagerPopup(
     tui,
@@ -184,6 +189,7 @@ test("Settings has only the update switch; Community remains in tab navigation",
     popup.render(76).join("\n"),
     /Auto-check updates at startup.*on/,
   );
+  assert.match(popup.render(76).join("\n"), /Show LazyPi frontpage.*on/);
   assert.doesNotMatch(popup.render(76).join("\n"), /Show Community tab/);
   assert.match(
     popup.render(76).join("\n"),
@@ -451,6 +457,9 @@ test("startup update checks use cached metadata, and update-all previews without
       cwd: root,
       isProjectTrusted: () => false,
       ui: {
+        setHeader: () => {
+          throw new Error("header unavailable");
+        },
         custom: async (
           factory: Parameters<ExtensionCommandContext["ui"]["custom"]>[0],
         ) =>

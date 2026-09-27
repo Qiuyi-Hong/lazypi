@@ -56,6 +56,7 @@ type LazyPiState = {
   bootstrapComplete?: boolean;
   enabledExtras?: string[];
   autoCheckUpdates?: boolean;
+  showFrontpage?: boolean;
 };
 
 export function readLazyPiState(dir: string): LazyPiState {
@@ -72,10 +73,39 @@ export function readLazyPiState(dir: string): LazyPiState {
     ("enabledExtras" in data &&
       (!Array.isArray(data.enabledExtras) ||
         data.enabledExtras.some((id: unknown) => typeof id !== "string"))) ||
-    ("autoCheckUpdates" in data && typeof data.autoCheckUpdates !== "boolean")
+    ("autoCheckUpdates" in data &&
+      typeof data.autoCheckUpdates !== "boolean") ||
+    ("showFrontpage" in data && typeof data.showFrontpage !== "boolean")
   )
     throw new Error(`Invalid LazyPi state: ${file}`);
   return data as LazyPiState;
+}
+
+// Startup treats optional preferences independently; health and Settings use strict validation above.
+export function readStartupPreferences(dir: string): {
+  showFrontpage: boolean;
+  autoCheckUpdates: boolean;
+} {
+  try {
+    const data: unknown = JSON.parse(
+      readFileSync(join(dir, "lazypi.json"), "utf8"),
+    );
+    if (
+      !data ||
+      typeof data !== "object" ||
+      Array.isArray(data) ||
+      !("version" in data) ||
+      data.version !== 1
+    )
+      return { showFrontpage: true, autoCheckUpdates: false };
+    const state = data as Partial<LazyPiState>;
+    return {
+      showFrontpage: state.showFrontpage !== false,
+      autoCheckUpdates: state.autoCheckUpdates === true,
+    };
+  } catch {
+    return { showFrontpage: true, autoCheckUpdates: false };
+  }
 }
 
 export function writeLazyPiState(
