@@ -72,14 +72,15 @@ test("interactive startup, resume and reload install a readable frontpage using 
     for (const fragment of [
       "LazyPi",
       "provider/model-42",
-      ctx.cwd,
-      ctx.sessionManager.getSessionDir(),
+      "wide-路",
+      "长长",
       "/lazypi",
       "/lazypi extras",
       "/lazypi community",
       "/lazypi updates",
     ])
       assert.ok(text.includes(fragment), fragment);
+    assert.ok(lines.length < 15, "long paths must not fill the header");
     assert.equal("handleInput" in component, false);
     assert.ok(component.render(1).every((line) => visibleWidth(line) <= 1));
     (ctx as { model?: { provider: string; id: string } }).model = {
@@ -192,6 +193,115 @@ test("wide startup header renders a connected blue wordmark and a truthful two-c
         );
       }
       if (colored) assert.match(component.render(120).join(""), /\x1b\[34m/);
+    }
+  } finally {
+    if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previous;
+  }
+});
+
+test("header factory reflows on resize and uses active theme roles without a background", () => {
+  const root = mkdtempSync(join(tmpdir(), "lazypi-responsive-"));
+  const previous = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = root;
+  try {
+    let start!: (event: unknown, ctx: ExtensionContext) => void;
+    extension({
+      on: (_: string, handler: typeof start) => {
+        start = handler;
+        return () => {};
+      },
+      registerCommand: () => {},
+    } as unknown as Parameters<typeof extension>[0]);
+    let factory: NonNullable<
+      Parameters<ExtensionContext["ui"]["setHeader"]>[0]
+    >;
+    const ctx = {
+      mode: "tui",
+      cwd: `${root}/project/` + "路".repeat(100) + "/actual.ts",
+      model: { provider: "provider", id: "路".repeat(100) },
+      sessionManager: {
+        getSessionDir: () =>
+          `${root}/sessions/` + "长".repeat(100) + "/current.jsonl",
+      },
+      ui: { setHeader: (value: typeof factory) => (factory = value) },
+    } as unknown as ExtensionContext;
+    start({}, ctx);
+    assert.ok(factory!);
+    for (const [name, code] of [
+      ["dark", 34],
+      ["light", 94],
+      ["monochrome", 1],
+    ] as const) {
+      const activeTheme = {
+        fg: (role: string, text: string) =>
+          `\x1b[${role === "accent" ? code : 37}m${text}\x1b[0m`,
+      } as Theme;
+      const component = factory!(tui, activeTheme);
+      for (const width of [1, 16, 24, 28, 31, 32, 40, 60, 87, 88, 120]) {
+        const lines = component.render(width);
+        const raw = lines.map(stripTerminalSequences);
+        assert.ok(
+          lines.every((line) => visibleWidth(line) <= width),
+          `${name} at ${width}`,
+        );
+        assert.doesNotMatch(
+          lines.join(""),
+          /\x1b\[(?:4[0-9]|10[0-7]|48;)[^m]*m/,
+          "no forced background",
+        );
+        if (width >= 24) {
+          for (const command of [
+            "/lazypi",
+            "/lazypi extras",
+            "/lazypi community",
+            "/lazypi updates",
+          ])
+            assert.ok(
+              raw.some((line) => line.includes(command)),
+              `${name} ${width}: ${command}`,
+            );
+          assert.ok(
+            raw.some((line) => line.includes("actual.ts")),
+            "real cwd tail",
+          );
+          assert.ok(
+            raw.some((line) => line.includes("current.jsonl")),
+            "real session tail",
+          );
+        }
+        if (width >= 32 && width < 88) {
+          assert.ok(
+            raw.includes("SESSION") && raw.includes("LAZYPI"),
+            "stacked groups",
+          );
+          assert.ok(
+            raw.some((line) => line.includes("LazyPi")),
+            "compact wordmark",
+          );
+          assert.ok(
+            !raw.some((line) => /[█░╭│]/.test(line)),
+            "no wide ornament",
+          );
+          assert.ok(lines.length <= 14, "bounded header height");
+        }
+        if (width < 32) {
+          assert.ok(
+            !raw.some((line) => /[█░╭│]/.test(line)),
+            "ornament omitted first",
+          );
+          assert.ok(lines.length <= 8, "essential rows only");
+        }
+        if (width >= 88)
+          assert.ok(
+            raw.some((line) => line.startsWith("╭")),
+            "wide panel restored",
+          );
+      }
+      assert.match(
+        component.render(40).join(""),
+        new RegExp(`\\x1b\\[${code}m`),
+      );
     }
   } finally {
     if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
