@@ -48,10 +48,23 @@ import type { ExtraCategory, PiResourceType } from "../src/extras.ts";
 export default function (pi: ExtensionAPI) {
   let ownsHeader = false;
   const installFrontpage = (ctx: ExtensionContext) => {
-    ctx.ui.setHeader((_tui, theme) => ({
+    ctx.ui.setHeader((tui, theme) => ({
       render(width) {
         try {
-          return frontpage(ctx, theme, width);
+          const lines = frontpage(
+            ctx,
+            theme,
+            width,
+            pi.getThinkingLevel?.() ?? "unknown",
+          );
+          const top = Math.max(
+            0,
+            Math.min(
+              Math.floor((tui.terminal.rows - lines.length) / 2),
+              tui.terminal.rows - lines.length - 6,
+            ),
+          );
+          return [...Array(top).fill(""), ...lines];
         } catch {
           return []; // A failed header must never break Pi's terminal render.
         }

@@ -80,7 +80,10 @@ test("interactive startup, resume and reload install a readable frontpage using 
       "/lazypi updates",
     ])
       assert.ok(text.includes(fragment), fragment);
-    assert.ok(lines.length < 15, "long paths must not fill the header");
+    assert.ok(
+      lines.filter((line) => line.trim()).length < 15,
+      "long paths must not fill the header",
+    );
     assert.equal("handleInput" in component, false);
     assert.ok(component.render(1).every((line) => visibleWidth(line) <= 1));
     (ctx as { model?: { provider: string; id: string } }).model = {
@@ -142,7 +145,7 @@ test("wide startup header renders a connected blue wordmark and a truthful two-c
         const raw = lines.map(stripTerminalSequences);
         const logo = raw.slice(
           0,
-          raw.findIndex((line) => line.startsWith("╭")),
+          raw.findIndex((line) => line.trimStart().startsWith("╭")),
         );
         assert.ok(logo.length >= 6, "large logo sits above the panel");
         assert.ok(
@@ -153,7 +156,11 @@ test("wide startup header renders a connected blue wordmark and a truthful two-c
           logo.some((line) => /░/.test(line)),
           "offset outline/shadow",
         );
-        assert.ok(logo[5]?.startsWith("█".repeat(14)), "the L foot joins A");
+        const logoStart = logo.findIndex((line) => line.includes("█"));
+        assert.ok(
+          logo[logoStart + 5]?.trimStart().startsWith("█".repeat(14)),
+          "the L foot joins A",
+        );
         const zs = logo
           .flatMap((line, row) =>
             Array.from(line.matchAll(/z/g), (match) => ({
@@ -168,7 +175,9 @@ test("wide startup header renders a connected blue wordmark and a truthful two-c
         assert.ok(
           gaps.every((gap, i) => gap > 0 && (i === 0 || gap > gaps[i - 1]!)),
         );
-        const panel = raw.slice(raw.findIndex((line) => line.startsWith("╭")));
+        const panel = raw
+          .slice(raw.findIndex((line) => line.trimStart().startsWith("╭")))
+          .map((line) => line.trimStart());
         assert.match(panel[0]!, /^╭─+╮$/);
         assert.match(panel.at(-1)!, /^╰─+╯$/);
         assert.ok(panel.some((line) => /│.*SESSION.*│.*LAZYPI.*│/.test(line)));
@@ -272,7 +281,8 @@ test("header factory reflows on resize and uses active theme roles without a bac
         }
         if (width >= 32 && width < 88) {
           assert.ok(
-            raw.includes("SESSION") && raw.includes("LAZYPI"),
+            raw.some((line) => line.trim() === "SESSION") &&
+              raw.some((line) => line.trim() === "LAZYPI"),
             "stacked groups",
           );
           assert.ok(
@@ -283,18 +293,24 @@ test("header factory reflows on resize and uses active theme roles without a bac
             !raw.some((line) => /[█░╭│]/.test(line)),
             "no wide ornament",
           );
-          assert.ok(lines.length <= 14, "bounded header height");
+          assert.ok(
+            raw.filter((line) => line.trim()).length <= 15,
+            "bounded header content",
+          );
         }
         if (width < 32) {
           assert.ok(
             !raw.some((line) => /[█░╭│]/.test(line)),
             "ornament omitted first",
           );
-          assert.ok(lines.length <= 8, "essential rows only");
+          assert.ok(
+            raw.filter((line) => line.trim()).length <= 9,
+            "essential rows only",
+          );
         }
         if (width >= 88)
           assert.ok(
-            raw.some((line) => line.startsWith("╭")),
+            raw.some((line) => line.trimStart().startsWith("╭")),
             "wide panel restored",
           );
       }
@@ -303,6 +319,64 @@ test("header factory reflows on resize and uses active theme roles without a bac
         new RegExp(`\\x1b\\[${code}m`),
       );
     }
+  } finally {
+    if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previous;
+  }
+});
+
+test("startup header centers the wordmark and details without hiding the prompt on short terminals", () => {
+  const root = mkdtempSync(join(tmpdir(), "lazypi-centered-"));
+  const previous = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = root;
+  try {
+    let start!: (event: unknown, ctx: ExtensionContext) => void;
+    let effort = "high";
+    extension({
+      on: (_: string, handler: typeof start) => {
+        start = handler;
+        return () => {};
+      },
+      getThinkingLevel: () => effort,
+      registerCommand: () => {},
+    } as unknown as Parameters<typeof extension>[0]);
+    let factory!: NonNullable<
+      Parameters<ExtensionContext["ui"]["setHeader"]>[0]
+    >;
+    start({}, {
+      mode: "tui",
+      cwd: root,
+      model: { provider: "provider", id: "model-42" },
+      sessionManager: { getSessionDir: () => "" },
+      ui: { setHeader: (value: typeof factory) => (factory = value) },
+    } as unknown as ExtensionContext);
+    const tall = { ...tui, terminal: { rows: 48 } } as TUI;
+    const component = factory(tall, theme);
+    const wide = component.render(160).map(stripTerminalSequences);
+    const first = wide.findIndex((line) => line.includes("█"));
+    const border = wide.findIndex((line) => line.includes("╭"));
+    assert.equal(wide[first]!.indexOf("█"), Math.floor((160 - 79) / 2));
+    assert.equal(wide[border]!.indexOf("╭"), (160 - 112) / 2);
+    assert.ok(first > 0, "logo is vertically centered on tall screens");
+    assert.ok(Math.abs(first + (wide.length - first) / 2 - 48 / 2) <= 1);
+    assert.match(
+      wide.join("\n"),
+      /Model.*provider\/model-42[^\n]*\n.*Thinking effort.*high/,
+    );
+
+    const narrow = component.render(40).map(stripTerminalSequences);
+    assert.ok(narrow.every((line) => visibleWidth(line) <= 40));
+    assert.equal(
+      narrow.find((line) => line.includes("LazyPi"))!.indexOf("LazyPi"),
+      17,
+    );
+    assert.match(narrow.join("\n"), /Thinking effort.*high/);
+    effort = "off";
+    assert.match(component.render(120).join("\n"), /Thinking effort.*off/);
+
+    const short = factory(tui, theme).render(120);
+    assert.ok(short.length <= 18, "leave room for Pi's editor and footer");
+    assert.ok(short.every((line) => visibleWidth(line) <= 120));
   } finally {
     if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = previous;

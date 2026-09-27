@@ -85,6 +85,7 @@ function wideFrontpage(
   ctx: ExtensionContext,
   theme: Theme,
   width: number,
+  thinkingEffort: string,
 ): string[] {
   const panelWidth = Math.min(width, 112);
   const leftWidth = Math.floor((panelWidth - 7) / 2);
@@ -94,6 +95,7 @@ function wideFrontpage(
     "SESSION",
     "",
     `Model · ${ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "No model selected"}`,
+    `Thinking effort · ${thinkingEffort}`,
     path("Working directory", ctx.cwd, leftWidth),
     ...(sessionDir ? [path("Session directory", sessionDir, leftWidth)] : []),
   ];
@@ -113,12 +115,14 @@ function wideFrontpage(
     (_, i) =>
       `${border("│")} ${cell(info[i] ?? "", leftWidth, i === 0)} ${border("│")} ${cell(links[i] ?? "", rightWidth, i === 0)} ${border("│")}`,
   );
+  const pad = " ".repeat(Math.floor((width - panelWidth) / 2));
+  const logoPad = " ".repeat(Math.floor((width - 79) / 2));
   return [
-    ...wordmark(theme),
+    ...wordmark(theme).map((line) => logoPad + line),
     "",
-    border("╭" + "─".repeat(panelWidth - 2) + "╮"),
-    ...rows,
-    border("╰" + "─".repeat(panelWidth - 2) + "╯"),
+    pad + border("╭" + "─".repeat(panelWidth - 2) + "╮"),
+    ...rows.map((row) => pad + row),
+    pad + border("╰" + "─".repeat(panelWidth - 2) + "╯"),
   ];
 }
 
@@ -126,15 +130,17 @@ export function frontpage(
   ctx: ExtensionContext,
   theme: Theme,
   width: number,
+  thinkingEffort: string,
 ): string[] {
   // Reserve room for both columns and the ascending z marks.
-  if (width >= 88) return wideFrontpage(ctx, theme, width);
+  if (width >= 88) return wideFrontpage(ctx, theme, width, thinkingEffort);
   const sessionDir = ctx.sessionManager.getSessionDir();
   const grouped = width >= 32;
   const rows = [
     "LazyPi",
     ...(grouped ? ["", "SESSION"] : []),
     `Model · ${ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "No model selected"}`,
+    `Thinking effort · ${thinkingEffort}`,
     path("Cwd", ctx.cwd, width),
     ...(sessionDir ? [path("Session", sessionDir, width)] : []),
     ...(grouped ? ["", "LAZYPI"] : []),
@@ -142,10 +148,11 @@ export function frontpage(
       width >= 40 ? `${name} · ${hint}` : name,
     ),
   ];
-  return rows.map((row, index) =>
-    theme.fg(
+  return rows.map((row, index) => {
+    const line = theme.fg(
       index === 0 || row === "SESSION" || row === "LAZYPI" ? "accent" : "text",
       truncateToWidth(plain(row), width, "…"),
-    ),
-  );
+    );
+    return " ".repeat(Math.floor((width - visibleWidth(line)) / 2)) + line;
+  });
 }
