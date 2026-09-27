@@ -7,6 +7,10 @@
 - Default-on read-only session frontpage with a persistent Settings opt-out, independent of startup update notifications.
 - Wide terminals now show an outlined LazyPi wordmark above side-by-side session details and package-view commands.
 
+### Changed
+
+- Narrow terminals stack session details and package commands, abbreviate long paths, and prioritize readable content over decoration.
+
 ## 0.2.4 (2026-09-27)
 
 ### Added

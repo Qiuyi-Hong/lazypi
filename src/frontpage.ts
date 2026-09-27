@@ -3,7 +3,6 @@ import {
   sliceByColumn,
   truncateToWidth,
   visibleWidth,
-  wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import { plain } from "./ui.ts";
 
@@ -62,6 +61,26 @@ function wordmark(theme: Theme): string[] {
   );
 }
 
+function path(label: string, value: string, width: number): string {
+  const prefix = `${label} · `;
+  const clean = plain(value);
+  const room = width - visibleWidth(prefix);
+  if (room <= 1) return truncateToWidth(prefix, width, "…");
+  return (
+    prefix +
+    (visibleWidth(clean) > room
+      ? `…${sliceByColumn(clean, visibleWidth(clean) - room + 1, room - 1, true)}`
+      : clean)
+  );
+}
+
+const commands = [
+  ["/lazypi", "Pi-configured packages"],
+  ["/lazypi extras", "optional capabilities"],
+  ["/lazypi community", "npm discovery"],
+  ["/lazypi updates", "newer npm versions"],
+] as const;
+
 function wideFrontpage(
   ctx: ExtensionContext,
   theme: Theme,
@@ -70,32 +89,18 @@ function wideFrontpage(
   const panelWidth = Math.min(width, 112);
   const leftWidth = Math.floor((panelWidth - 7) / 2);
   const rightWidth = panelWidth - 7 - leftWidth;
-  const path = (label: string, value: string) => {
-    const prefix = `${label} · `;
-    const clean = plain(value);
-    const room = leftWidth - visibleWidth(prefix);
-    return (
-      prefix +
-      (visibleWidth(clean) > room
-        ? `…${sliceByColumn(clean, visibleWidth(clean) - room + 1, room - 1)}`
-        : clean)
-    );
-  };
   const sessionDir = ctx.sessionManager.getSessionDir();
   const info = [
     "SESSION",
     "",
     `Model · ${ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "No model selected"}`,
-    path("Working directory", ctx.cwd),
-    ...(sessionDir ? [path("Session directory", sessionDir)] : []),
+    path("Working directory", ctx.cwd, leftWidth),
+    ...(sessionDir ? [path("Session directory", sessionDir, leftWidth)] : []),
   ];
-  const commands = [
+  const links = [
     "LAZYPI",
     "",
-    "/lazypi · Pi-configured packages",
-    "/lazypi extras · optional capabilities",
-    "/lazypi community · npm discovery",
-    "/lazypi updates · newer npm versions",
+    ...commands.map(([name, hint]) => `${name} · ${hint}`),
   ];
   const border = (text: string) => theme.fg("border", text);
   const cell = (text: string, size: number, heading: boolean) =>
@@ -104,9 +109,9 @@ function wideFrontpage(
       truncateToWidth(plain(text), size, "…", true),
     );
   const rows = Array.from(
-    { length: Math.max(info.length, commands.length) },
+    { length: Math.max(info.length, links.length) },
     (_, i) =>
-      `${border("│")} ${cell(info[i] ?? "", leftWidth, i === 0)} ${border("│")} ${cell(commands[i] ?? "", rightWidth, i === 0)} ${border("│")}`,
+      `${border("│")} ${cell(info[i] ?? "", leftWidth, i === 0)} ${border("│")} ${cell(links[i] ?? "", rightWidth, i === 0)} ${border("│")}`,
   );
   return [
     ...wordmark(theme),
@@ -124,28 +129,23 @@ export function frontpage(
 ): string[] {
   // Reserve room for both columns and the ascending z marks.
   if (width >= 88) return wideFrontpage(ctx, theme, width);
-  const model = ctx.model;
   const sessionDir = ctx.sessionManager.getSessionDir();
-  const commands = [
-    "/lazypi",
-    "/lazypi extras",
-    "/lazypi community",
-    "/lazypi updates",
-  ];
-  const links = commands.join("  ·  ");
+  const grouped = width >= 32;
   const rows = [
-    "LazyPi · Pi packages",
-    `Model · ${model ? `${model.provider}/${model.id}` : "No model selected"}`,
-    `Working directory · ${ctx.cwd}`,
-    ...(sessionDir ? [`Session directory · ${sessionDir}`] : []),
-    ...(visibleWidth(links) <= width ? [links] : commands),
+    "LazyPi",
+    ...(grouped ? ["", "SESSION"] : []),
+    `Model · ${ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "No model selected"}`,
+    path("Cwd", ctx.cwd, width),
+    ...(sessionDir ? [path("Session", sessionDir, width)] : []),
+    ...(grouped ? ["", "LAZYPI"] : []),
+    ...commands.map(([name, hint]) =>
+      width >= 40 ? `${name} · ${hint}` : name,
+    ),
   ];
-  return rows.flatMap((row, index) =>
-    wrapTextWithAnsi(plain(row), Math.max(1, width)).map((line) =>
-      theme.fg(
-        index === 0 ? "accent" : "text",
-        truncateToWidth(line, Math.max(0, width)),
-      ),
+  return rows.map((row, index) =>
+    theme.fg(
+      index === 0 || row === "SESSION" || row === "LAZYPI" ? "accent" : "text",
+      truncateToWidth(plain(row), width, "…"),
     ),
   );
 }
