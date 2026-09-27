@@ -1,4 +1,6 @@
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
+import { homedir } from "node:os";
+import { parse, sep } from "node:path";
 import {
   getKeybindings,
   sliceByColumn,
@@ -65,13 +67,21 @@ function wordmark(theme: Theme, zShift: number): string[] {
 function path(label: string, value: string, width: number): string {
   const prefix = `${label} · `;
   const clean = plain(value);
+  const home = homedir();
+  const inHome = clean === home || clean.startsWith(home + sep);
+  const root = inHome ? "~" : parse(clean).root;
+  const parts = clean
+    .slice(inHome ? home.length : root.length)
+    .split(sep)
+    .filter(Boolean);
+  const short = `${root}${inHome && parts.length ? sep : ""}${parts.length > 2 ? `…${sep}` : ""}${parts.slice(-2).join(sep)}`;
   const room = width - visibleWidth(prefix);
   if (room <= 1) return truncateToWidth(prefix, width, "…");
   return (
     prefix +
-    (visibleWidth(clean) > room
-      ? `…${sliceByColumn(clean, visibleWidth(clean) - room + 1, room - 1, true)}`
-      : clean)
+    (visibleWidth(short) > room
+      ? `…${sliceByColumn(short, visibleWidth(short) - room + 1, room - 1, true)}`
+      : short)
   );
 }
 
@@ -92,7 +102,6 @@ function shortcuts(full: boolean): string[] {
     const binding = keys.getKeys(action).join("/");
     return binding ? `${binding} · ${description}` : "";
   };
-  const clear = keys.getKeys("app.clear").join("/");
   const cycle = [
     ...keys.getKeys("app.model.cycleForward"),
     ...keys.getKeys("app.model.cycleBackward"),
@@ -103,23 +112,14 @@ function shortcuts(full: boolean): string[] {
     ...[
       hint("app.interrupt", "to interrupt"),
       hint("app.clear", "to clear"),
-      clear ? `${clear} twice · exit` : "",
       hint("app.exit", "to exit (empty)"),
-      hint("app.suspend", "to suspend"),
-      hint("tui.editor.deleteToLineEnd", "to delete to end"),
       hint("app.thinking.cycle", "to cycle thinking level"),
       cycle ? `${cycle} · to cycle models` : "",
       hint("app.model.select", "to select model"),
       hint("app.tools.expand", "to expand tools"),
-      hint("app.thinking.toggle", "to expand thinking"),
-      hint("app.editor.external", "for external editor"),
       "/ · for commands",
       "! · to run bash",
       "!! · to run bash (no context)",
-      hint("app.message.followUp", "to queue follow-up"),
-      hint("app.message.dequeue", "to edit all queued messages"),
-      hint("app.clipboard.pasteImage", "to paste image (with text fallback)"),
-      "drop files · to attach",
     ].filter(Boolean),
   ];
 }

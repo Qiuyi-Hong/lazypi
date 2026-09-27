@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { join, parse, sep } from "node:path";
 import { test } from "node:test";
 import type {
   ExtensionCommandContext,
@@ -18,6 +18,7 @@ import {
   type TUI,
 } from "@earendil-works/pi-tui";
 import extension from "../extensions/lazypi.ts";
+import { frontpage } from "../src/frontpage.ts";
 import {
   markSetupComplete,
   readLazyPiState,
@@ -98,6 +99,37 @@ test("interactive startup, resume and reload install a readable frontpage using 
     if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = previous;
   }
+});
+
+test("frontpage abbreviates home and limits both paths to two trailing components", () => {
+  const home = homedir();
+  const root = parse(home).root;
+  const ctx = {
+    cwd: join(home, "Projects", "lazypi"),
+    model: undefined,
+    sessionManager: {
+      getSessionDir: () =>
+        join(home, ".pi", "agent", "sessions", "2026", "id.jsonl"),
+    },
+  } as unknown as ExtensionContext;
+  const wide = frontpage(ctx, theme, 120, "off").join("\n");
+  assert.match(wide, /Working directory · ~\/Projects\/lazypi/);
+  assert.match(wide, /Session directory · ~\/…\/2026\/id\.jsonl/);
+  const narrow = frontpage(ctx, theme, 60, "off").join("\n");
+  assert.match(narrow, /Cwd · ~\/Projects\/lazypi/);
+  assert.match(narrow, /Session · ~\/…\/2026\/id\.jsonl/);
+
+  ctx.cwd = join(root, "other", "account", "team", "project");
+  ctx.sessionManager.getSessionDir = () =>
+    `${home}-other${sep}deep${sep}sessions`;
+  const outside = frontpage(ctx, theme, 120, "off").join("\n");
+  assert.ok(
+    outside.includes(`Working directory · ${root}…${sep}team${sep}project`),
+  );
+  assert.ok(
+    outside.includes(`Session directory · ${root}…${sep}deep${sep}sessions`),
+  );
+  assert.doesNotMatch(outside, /Session directory · ~/);
 });
 
 test("wide startup header renders a connected blue wordmark and a truthful two-column panel", () => {
@@ -377,7 +409,6 @@ test("startup header keeps the wordmark and details near the top without hiding 
       ["app.tools.expand", "ctrl+o"],
       ["app.thinking.toggle", "ctrl+t"],
       ["app.editor.external", "ctrl+g"],
-      ["app.message.followUp", "alt+enter"],
       ["app.message.dequeue", "alt+up"],
       ["app.clipboard.pasteImage", "ctrl+v"],
     ]);
@@ -404,42 +435,36 @@ test("startup header keeps the wordmark and details near the top without hiding 
       "app.interrupt",
       "app.clear",
       "app.exit",
-      "app.suspend",
-      "tui.editor.deleteToLineEnd",
       "app.thinking.cycle",
       "app.model.cycleForward",
       "app.model.cycleBackward",
       "app.model.select",
       "app.tools.expand",
-      "app.thinking.toggle",
-      "app.editor.external",
-      "app.message.followUp",
-      "app.message.dequeue",
-      "app.clipboard.pasteImage",
     ] as const)
       assert.ok(fullText.includes(bindings.get(action)!), action);
     for (const hint of [
       "escape · to interrupt",
       "ctrl+shift+c · to clear",
-      "ctrl+shift+c twice · exit",
       "ctrl+d · to exit (empty)",
-      "ctrl+z · to suspend",
-      "ctrl+k · to delete to end",
       "shift+tab · to cycle thinking level",
       "ctrl+p/shift+ctrl+p · to cycle models",
       "ctrl+l · to select model",
       "ctrl+o · to expand tools",
-      "ctrl+t · to expand thinking",
-      "ctrl+g · for external editor",
       "/ · for commands",
       "! · to run bash",
       "!! · to run bash (no context)",
-      "alt+enter · to queue follow-up",
-      "alt+up · to edit all queued messages",
-      "ctrl+v · to paste image (with text fallback)",
-      "drop files · to attach",
     ])
       assert.ok(fullText.includes(hint), hint);
+    assert.doesNotMatch(fullText, /alt\+enter · to queue follow-up/);
+    assert.equal(
+      wide
+        .slice(
+          wide.findIndex((line) => line.includes("KEYBOARD SHORTCUTS")) + 1,
+          wide.findIndex((line) => line.includes("╰")),
+        )
+        .filter((line) => line.includes(" · ")).length,
+      10,
+    );
     const first = wide.findIndex((line) => line.includes("█"));
     const border = wide.findIndex((line) => line.includes("╭"));
     assert.equal(wide[first]!.indexOf("█"), Math.floor((160 - 60) / 2));
