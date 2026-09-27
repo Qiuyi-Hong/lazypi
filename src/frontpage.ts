@@ -1,16 +1,129 @@
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import {
+  sliceByColumn,
   truncateToWidth,
   visibleWidth,
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import { plain } from "./ui.ts";
 
+// Five-cell letters share edges: the bottom stroke of L touches the A.
+const letters = [
+  ["██   ", "██   ", "██   ", "██   ", "██   ", "█████"],
+  [" ███ ", "██ ██", "█████", "██ ██", "██ ██", "██ ██"],
+  ["█████", "   ██", "  ██ ", " ██  ", "██   ", "█████"],
+  ["██ ██", "██ ██", " ███ ", "  ██ ", "  ██ ", "  ██ "],
+  ["████ ", "██ ██", "████ ", "██   ", "██   ", "██   "],
+  ["█████", "  ██ ", "  ██ ", "  ██ ", "  ██ ", "█████"],
+];
+
+function wordmark(theme: Theme): string[] {
+  const pixels = Array.from(
+    { length: 7 },
+    () => Array(79).fill(" ") as string[],
+  );
+  for (let y = 0; y < 6; y++) {
+    const row = letters.map((letter) => letter[y]).join("");
+    for (let x = 0; x < row.length; x++) {
+      if (row[x] !== "█") continue;
+      pixels[y]![x * 2] = "█";
+      pixels[y]![x * 2 + 1] = "█";
+    }
+  }
+  // A one-cell offset traces the outside of the solid letters.
+  for (let y = 5; y >= 0; y--)
+    for (let x = 59; x >= 0; x--)
+      if (pixels[y]![x] === "█" && pixels[y + 1]![x + 1] === " ")
+        pixels[y + 1]![x + 1] = "░";
+  for (const [x, y] of [
+    [62, 4],
+    [65, 3],
+    [70, 2],
+    [77, 1],
+  ])
+    pixels[y]![x] = "z";
+  return pixels.map((row) =>
+    (
+      row
+        .join("")
+        .trimEnd()
+        .match(/█+|░+|z+| +/g) ?? []
+    )
+      .map((part) =>
+        part[0] === "█"
+          ? theme.fg("accent", part)
+          : part[0] === "░"
+            ? theme.fg("border", part)
+            : part[0] === "z"
+              ? theme.fg("accent", part)
+              : part,
+      )
+      .join(""),
+  );
+}
+
+function wideFrontpage(
+  ctx: ExtensionContext,
+  theme: Theme,
+  width: number,
+): string[] {
+  const panelWidth = Math.min(width, 112);
+  const leftWidth = Math.floor((panelWidth - 7) / 2);
+  const rightWidth = panelWidth - 7 - leftWidth;
+  const path = (label: string, value: string) => {
+    const prefix = `${label} · `;
+    const clean = plain(value);
+    const room = leftWidth - visibleWidth(prefix);
+    return (
+      prefix +
+      (visibleWidth(clean) > room
+        ? `…${sliceByColumn(clean, visibleWidth(clean) - room + 1, room - 1)}`
+        : clean)
+    );
+  };
+  const sessionDir = ctx.sessionManager.getSessionDir();
+  const info = [
+    "SESSION",
+    "",
+    `Model · ${ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "No model selected"}`,
+    path("Working directory", ctx.cwd),
+    ...(sessionDir ? [path("Session directory", sessionDir)] : []),
+  ];
+  const commands = [
+    "LAZYPI",
+    "",
+    "/lazypi · Pi-configured packages",
+    "/lazypi extras · optional capabilities",
+    "/lazypi community · npm discovery",
+    "/lazypi updates · newer npm versions",
+  ];
+  const border = (text: string) => theme.fg("border", text);
+  const cell = (text: string, size: number, heading: boolean) =>
+    theme.fg(
+      heading ? "accent" : "text",
+      truncateToWidth(plain(text), size, "…", true),
+    );
+  const rows = Array.from(
+    { length: Math.max(info.length, commands.length) },
+    (_, i) =>
+      `${border("│")} ${cell(info[i] ?? "", leftWidth, i === 0)} ${border("│")} ${cell(commands[i] ?? "", rightWidth, i === 0)} ${border("│")}`,
+  );
+  return [
+    ...wordmark(theme),
+    "",
+    border("╭" + "─".repeat(panelWidth - 2) + "╮"),
+    ...rows,
+    border("╰" + "─".repeat(panelWidth - 2) + "╯"),
+  ];
+}
+
 export function frontpage(
   ctx: ExtensionContext,
   theme: Theme,
   width: number,
 ): string[] {
+  // Reserve room for both columns and the ascending z marks.
+  if (width >= 88) return wideFrontpage(ctx, theme, width);
   const model = ctx.model;
   const sessionDir = ctx.sessionManager.getSessionDir();
   const commands = [

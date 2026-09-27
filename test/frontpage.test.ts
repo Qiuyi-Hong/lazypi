@@ -9,7 +9,11 @@ import type {
   RegisteredCommand,
   Theme,
 } from "@earendil-works/pi-coding-agent";
-import { visibleWidth, type TUI } from "@earendil-works/pi-tui";
+import {
+  stripTerminalSequences,
+  visibleWidth,
+  type TUI,
+} from "@earendil-works/pi-tui";
 import extension from "../extensions/lazypi.ts";
 import {
   markSetupComplete,
@@ -89,6 +93,112 @@ test("interactive startup, resume and reload install a readable frontpage using 
   }
 });
 
+test("wide startup header renders a connected blue wordmark and a truthful two-column panel", () => {
+  const root = mkdtempSync(join(tmpdir(), "lazypi-wide-header-"));
+  const previous = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = root;
+  try {
+    let start!: (event: unknown, ctx: ExtensionContext) => void;
+    extension({
+      on: (_: string, handler: typeof start) => {
+        start = handler;
+        return () => {};
+      },
+      registerCommand: () => {},
+    } as unknown as Parameters<typeof extension>[0]);
+    let factory: NonNullable<
+      Parameters<ExtensionContext["ui"]["setHeader"]>[0]
+    >;
+    const ctx = {
+      mode: "tui",
+      cwd: `${root}/` + "路".repeat(90),
+      model: { provider: "provider", id: "model-" + "a".repeat(90) },
+      sessionManager: {
+        getSessionDir: () => `${root}/sessions/` + "长".repeat(80),
+      },
+      ui: {
+        setHeader: (value: typeof factory) => {
+          factory = value;
+        },
+      },
+    } as unknown as ExtensionContext;
+    start({}, ctx);
+    assert.ok(factory!);
+    for (const colored of [false, true]) {
+      const activeTheme = {
+        fg: (color: string, text: string) =>
+          colored
+            ? `\x1b[${color === "accent" ? 34 : 37}m${text}\x1b[0m`
+            : text,
+      } as Theme;
+      const component = factory!(tui, activeTheme);
+      for (const width of [88, 96, 120, 160]) {
+        const lines = component.render(width);
+        assert.ok(
+          lines.every((line) => visibleWidth(line) <= width),
+          `width ${width}`,
+        );
+        const raw = lines.map(stripTerminalSequences);
+        const logo = raw.slice(
+          0,
+          raw.findIndex((line) => line.startsWith("╭")),
+        );
+        assert.ok(logo.length >= 6, "large logo sits above the panel");
+        assert.ok(
+          logo.some((line) => /█/.test(line)),
+          "block-letter wordmark",
+        );
+        assert.ok(
+          logo.some((line) => /░/.test(line)),
+          "offset outline/shadow",
+        );
+        assert.ok(logo[5]?.startsWith("█".repeat(14)), "the L foot joins A");
+        const zs = logo
+          .flatMap((line, row) =>
+            Array.from(line.matchAll(/z/g), (match) => ({
+              row,
+              col: match.index!,
+            })),
+          )
+          .sort((a, b) => b.row - a.row);
+        assert.equal(zs.length, 4);
+        assert.ok(zs.every((z, i) => i === 0 || z.row < zs[i - 1]!.row));
+        const gaps = zs.slice(1).map((z, i) => z.col - zs[i]!.col);
+        assert.ok(
+          gaps.every((gap, i) => gap > 0 && (i === 0 || gap > gaps[i - 1]!)),
+        );
+        const panel = raw.slice(raw.findIndex((line) => line.startsWith("╭")));
+        assert.match(panel[0]!, /^╭─+╮$/);
+        assert.match(panel.at(-1)!, /^╰─+╯$/);
+        assert.ok(panel.some((line) => /│.*SESSION.*│.*LAZYPI.*│/.test(line)));
+        for (const [command, label] of [
+          ["/lazypi", "Pi-configured packages"],
+          ["/lazypi extras", "optional capabilities"],
+          ["/lazypi community", "npm discovery"],
+          ["/lazypi updates", "newer npm versions"],
+        ])
+          assert.ok(
+            panel.some((line) => line.includes(`${command} · ${label}`)),
+            command,
+          );
+        assert.match(panel.join("\n"), /Model.*provider\/model-/);
+        assert.match(panel.join("\n"), /Working directory/);
+        assert.match(panel.join("\n"), /Session directory/);
+        assert.match(panel.join("\n"), /…路路/);
+        assert.match(panel.join("\n"), /…长长/);
+        assert.doesNotMatch(
+          panel.join("\n"),
+          /skills|extensions|Ctrl|Alt|Shift|⌘/i,
+        );
+      }
+      if (colored) assert.match(component.render(120).join(""), /\x1b\[34m/);
+    }
+  } finally {
+    if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previous;
+  }
+});
+
 test("no model or session directory is invented; non-interactive modes never set a header", () => {
   const root = mkdtempSync(join(tmpdir(), "lazypi-no-model-"));
   const previous = process.env.PI_CODING_AGENT_DIR;
@@ -122,6 +232,9 @@ test("no model or session directory is invented; non-interactive modes never set
     const text = headers[0]!(tui, theme).render(80).join("\n");
     assert.match(text, /Model.*No model selected/);
     assert.doesNotMatch(text, /Sessions/);
+    const wide = headers[0]!(tui, theme).render(120).join("\n");
+    assert.match(wide, /No model selected/);
+    assert.doesNotMatch(wide, /Session directory/);
   } finally {
     if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = previous;
