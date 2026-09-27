@@ -16,7 +16,7 @@ const letters = [
   ["█████", "  ██ ", "  ██ ", "  ██ ", "  ██ ", "█████"],
 ];
 
-function wordmark(theme: Theme): string[] {
+function wordmark(theme: Theme, zShift: number): string[] {
   const pixels = Array.from(
     { length: 7 },
     () => Array(79).fill(" ") as string[],
@@ -40,7 +40,7 @@ function wordmark(theme: Theme): string[] {
     [70, 2],
     [77, 1],
   ])
-    pixels[y]![x] = "z";
+    pixels[y]![x + zShift] = "z";
   return pixels.map((row) =>
     (
       row
@@ -116,9 +116,12 @@ function wideFrontpage(
       `${border("│")} ${cell(info[i] ?? "", leftWidth, i === 0)} ${border("│")} ${cell(links[i] ?? "", rightWidth, i === 0)} ${border("│")}`,
   );
   const pad = " ".repeat(Math.floor((width - panelWidth) / 2));
-  const logoPad = " ".repeat(Math.floor((width - 79) / 2));
+  const logoStart = Math.floor((width - 60) / 2);
+  const logoPad = " ".repeat(logoStart);
+  // Keep the trailing z marks on screen at the narrow end of the wide layout.
+  const zShift = Math.min(0, width - logoStart - 78);
   return [
-    ...wordmark(theme).map((line) => logoPad + line),
+    ...wordmark(theme, zShift).map((line) => logoPad + line),
     "",
     pad + border("╭" + "─".repeat(panelWidth - 2) + "╮"),
     ...rows.map((row) => pad + row),

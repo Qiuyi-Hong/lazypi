@@ -157,6 +157,14 @@ test("wide startup header renders a connected blue wordmark and a truthful two-c
           "offset outline/shadow",
         );
         const logoStart = logo.findIndex((line) => line.includes("█"));
+        const letterColumns = logo.flatMap((line) =>
+          Array.from(line.matchAll(/█/g), (match) => match.index!),
+        );
+        assert.equal(Math.min(...letterColumns), Math.floor((width - 60) / 2));
+        assert.equal(
+          Math.max(...letterColumns),
+          Math.floor((width - 60) / 2) + 59,
+        );
         assert.ok(
           logo[logoStart + 5]?.trimStart().startsWith("█".repeat(14)),
           "the L foot joins A",
@@ -355,7 +363,7 @@ test("startup header keeps the wordmark and details near the top without hiding 
     const wide = component.render(160).map(stripTerminalSequences);
     const first = wide.findIndex((line) => line.includes("█"));
     const border = wide.findIndex((line) => line.includes("╭"));
-    assert.equal(wide[first]!.indexOf("█"), Math.floor((160 - 79) / 2));
+    assert.equal(wide[first]!.indexOf("█"), Math.floor((160 - 60) / 2));
     assert.equal(wide[border]!.indexOf("╭"), (160 - 112) / 2);
     assert.equal(first, 2, "logo starts after two lines of top padding");
     assert.match(
