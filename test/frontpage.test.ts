@@ -222,6 +222,17 @@ test("Settings toggles the frontpage without losing other preferences or update 
       [],
       "opt-out must not replace another extension's header",
     );
+    writeLazyPiState(agent, { showFrontpage: true });
+    // Pi disposes the previous component when another extension takes the header.
+    headers.at(-1)!(tui, theme).dispose?.();
+    const before = headers.length;
+    await command("settings", ctx);
+    assert.equal(readLazyPiState(agent).showFrontpage, false);
+    assert.equal(
+      headers.length,
+      before,
+      "turning off LazyPi must not clear the replacement header",
+    );
   } finally {
     if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = previous;

@@ -57,6 +57,9 @@ export default function (pi: ExtensionAPI) {
         }
       },
       invalidate() {},
+      dispose() {
+        ownsHeader = false;
+      },
     }));
     ownsHeader = true;
   };
