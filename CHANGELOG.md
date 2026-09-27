@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Default-on read-only session frontpage with a persistent Settings opt-out, independent of startup update notifications.
+
 ## 0.2.4 (2026-09-27)
 
 ### Added

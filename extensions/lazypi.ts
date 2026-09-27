@@ -1,6 +1,7 @@
 import {
   getAgentDir,
   type ExtensionAPI,
+  type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { execute } from "../src/actions.ts";
 import {
@@ -9,9 +10,11 @@ import {
   isSetupComplete,
   markSetupComplete,
   readLazyPiState,
+  readStartupPreferences,
   writeLazyPiState,
 } from "../src/bootstrap.ts";
 import { core } from "../src/catalog.ts";
+import { frontpage } from "../src/frontpage.ts";
 import { CommunityRegistry } from "../src/community.ts";
 import {
   health,
@@ -43,12 +46,33 @@ import {
 import type { ExtraCategory, PiResourceType } from "../src/extras.ts";
 
 export default function (pi: ExtensionAPI) {
+  let ownsHeader = false;
+  const installFrontpage = (ctx: ExtensionContext) => {
+    ctx.ui.setHeader((_tui, theme) => ({
+      render(width) {
+        try {
+          return frontpage(ctx, theme, width);
+        } catch {
+          return []; // A failed header must never break Pi's terminal render.
+        }
+      },
+      invalidate() {},
+    }));
+    ownsHeader = true;
+  };
   pi.on("session_start", (_event, ctx) => {
     if (ctx.mode !== "tui") return;
+    const agentDir = getAgentDir();
+    const config = readStartupPreferences(agentDir);
+    if (config.showFrontpage) {
+      try {
+        installFrontpage(ctx);
+      } catch {
+        /* A broken header must not prevent Pi or update checks from starting. */
+      }
+    }
+    if (!config.autoCheckUpdates) return;
     try {
-      const agentDir = getAgentDir();
-      const config = readLazyPiState(agentDir);
-      if (!config.autoCheckUpdates) return;
       const { settings, manager } = createNative(
         ctx.cwd,
         ctx.isProjectTrusted(),
@@ -200,8 +224,8 @@ export default function (pi: ExtensionAPI) {
             ctx.isProjectTrusted(),
           );
           const items = inventory(settings, manager);
-          let preferences = {
-            version: 1 as const,
+          let preferences: ReturnType<typeof readLazyPiState> = {
+            version: 1,
             autoCheckUpdates: false,
           };
           try {
@@ -405,10 +429,22 @@ export default function (pi: ExtensionAPI) {
                 },
                 {
                   autoCheckUpdates: preferences.autoCheckUpdates ?? false,
+                  showFrontpage: preferences.showFrontpage ?? true,
                 },
                 (setting, enabled) => {
                   try {
                     writeLazyPiState(agentDir, { [setting]: enabled });
+                    if (setting === "showFrontpage") {
+                      try {
+                        if (enabled) installFrontpage(ctx);
+                        else if (ownsHeader) {
+                          ctx.ui.setHeader(undefined);
+                          ownsHeader = false;
+                        }
+                      } catch {
+                        /* Preference is saved; rendering remains optional. */
+                      }
+                    }
                     return true;
                   } catch (error) {
                     ctx.ui.notify(

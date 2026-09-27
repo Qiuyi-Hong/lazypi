@@ -43,7 +43,7 @@ const sectionShortcuts: Record<(typeof sections)[number], string> = {
   Updates: "T",
   Settings: "S",
 };
-type Preference = "autoCheckUpdates";
+type Preference = "autoCheckUpdates" | "showFrontpage";
 export type Choice = {
   action:
     | "install"
@@ -74,7 +74,7 @@ type Row = {
   core?: PackageSpec;
 };
 
-const plain = (value: string) =>
+export const plain = (value: string) =>
   value.replace(
     /[\x00-\x1f\x7f-\x9f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g,
     " ",
@@ -222,7 +222,7 @@ export class ManagerPopup implements Component {
   private detailsByName = new Map<string, RemotePackage>();
   private extraPackages = new Map<string, string[]>();
   private disposed = false;
-  private preferences: { autoCheckUpdates: boolean };
+  private preferences: { autoCheckUpdates: boolean; showFrontpage: boolean };
   private onSettingChange: (setting: Preference, enabled: boolean) => boolean;
   private onRemote?: (section: "Community" | "Updates", force: boolean) => void;
   constructor(
@@ -247,7 +247,9 @@ export class ManagerPopup implements Component {
       searchTimestamp?: number;
       offline?: boolean;
     } = {},
-    preferences = { autoCheckUpdates: false },
+    preferences: { autoCheckUpdates: boolean; showFrontpage?: boolean } = {
+      autoCheckUpdates: false,
+    },
     onSettingChange: (setting: Preference, enabled: boolean) => boolean = () =>
       true,
     onRemote?: (section: "Community" | "Updates", force: boolean) => void,
@@ -269,7 +271,7 @@ export class ManagerPopup implements Component {
     this.cachedDetails = remote.cachedDetails;
     this.searchTimestamp = remote.searchTimestamp;
     this.offline = remote.offline ?? false;
-    this.preferences = preferences;
+    this.preferences = { showFrontpage: true, ...preferences };
     this.onSettingChange = onSettingChange;
     this.onRemote = onRemote;
   }
@@ -447,6 +449,13 @@ export class ManagerPopup implements Component {
                 "Check npm asynchronously; notify only when newer versions are found.",
               state: this.preferences.autoCheckUpdates ? "on" : "off",
               source: "autoCheckUpdates",
+            },
+            {
+              name: "Show LazyPi frontpage",
+              description:
+                "Show session details and LazyPi shortcuts at startup.",
+              state: this.preferences.showFrontpage ? "on" : "off",
+              source: "showFrontpage",
             },
           ] satisfies Row[])
         : this.section === "Extras"
@@ -1104,7 +1113,7 @@ export class ManagerPopup implements Component {
       (data === " " || matchesKey(data, Key.enter))
     ) {
       const setting = rows[this.selected]?.source;
-      if (setting === "autoCheckUpdates") {
+      if (setting === "autoCheckUpdates" || setting === "showFrontpage") {
         const enabled = !this.preferences[setting];
         if (this.onSettingChange(setting, enabled)) {
           this.preferences[setting] = enabled;
