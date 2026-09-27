@@ -10,7 +10,10 @@ import type {
   Theme,
 } from "@earendil-works/pi-coding-agent";
 import {
+  getKeybindings,
+  setKeybindings,
   stripTerminalSequences,
+  type KeybindingsManager,
   visibleWidth,
   type TUI,
 } from "@earendil-works/pi-tui";
@@ -360,7 +363,83 @@ test("startup header keeps the wordmark and details near the top without hiding 
     } as unknown as ExtensionContext);
     const tall = { ...tui, terminal: { rows: 48 } } as TUI;
     const component = factory(tall, theme);
-    const wide = component.render(160).map(stripTerminalSequences);
+    const originalKeys = getKeybindings();
+    const bindings = new Map([
+      ["app.interrupt", "escape"],
+      ["app.clear", "ctrl+shift+c"],
+      ["app.exit", "ctrl+d"],
+      ["app.suspend", "ctrl+z"],
+      ["tui.editor.deleteToLineEnd", "ctrl+k"],
+      ["app.thinking.cycle", "shift+tab"],
+      ["app.model.cycleForward", "ctrl+p"],
+      ["app.model.cycleBackward", "shift+ctrl+p"],
+      ["app.model.select", "ctrl+l"],
+      ["app.tools.expand", "ctrl+o"],
+      ["app.thinking.toggle", "ctrl+t"],
+      ["app.editor.external", "ctrl+g"],
+      ["app.message.followUp", "alt+enter"],
+      ["app.message.dequeue", "alt+up"],
+      ["app.clipboard.pasteImage", "ctrl+v"],
+    ]);
+    setKeybindings({
+      getKeys: (action: string) =>
+        bindings.has(action) ? [bindings.get(action)!] : [],
+    } as KeybindingsManager);
+    let wide: string[];
+    try {
+      wide = component.render(160).map(stripTerminalSequences);
+      const stacked = component.render(40).map(stripTerminalSequences);
+      assert.ok(stacked.every((line) => visibleWidth(line) <= 40));
+      assert.match(
+        stacked.join("\n"),
+        /SESSION[\s\S]*KEYBOARD SHORTCUTS[\s\S]*LAZYPI/,
+      );
+      assert.ok(stacked.some((line) => line.includes("ctrl+shift+c")));
+    } finally {
+      setKeybindings(originalKeys);
+    }
+    const fullText = wide.join("\n");
+    assert.match(fullText, /SESSION[\s\S]*KEYBOARD SHORTCUTS/);
+    for (const action of [
+      "app.interrupt",
+      "app.clear",
+      "app.exit",
+      "app.suspend",
+      "tui.editor.deleteToLineEnd",
+      "app.thinking.cycle",
+      "app.model.cycleForward",
+      "app.model.cycleBackward",
+      "app.model.select",
+      "app.tools.expand",
+      "app.thinking.toggle",
+      "app.editor.external",
+      "app.message.followUp",
+      "app.message.dequeue",
+      "app.clipboard.pasteImage",
+    ] as const)
+      assert.ok(fullText.includes(bindings.get(action)!), action);
+    for (const hint of [
+      "escape · to interrupt",
+      "ctrl+shift+c · to clear",
+      "ctrl+shift+c twice · exit",
+      "ctrl+d · to exit (empty)",
+      "ctrl+z · to suspend",
+      "ctrl+k · to delete to end",
+      "shift+tab · to cycle thinking level",
+      "ctrl+p/shift+ctrl+p · to cycle models",
+      "ctrl+l · to select model",
+      "ctrl+o · to expand tools",
+      "ctrl+t · to expand thinking",
+      "ctrl+g · for external editor",
+      "/ · for commands",
+      "! · to run bash",
+      "!! · to run bash (no context)",
+      "alt+enter · to queue follow-up",
+      "alt+up · to edit all queued messages",
+      "ctrl+v · to paste image (with text fallback)",
+      "drop files · to attach",
+    ])
+      assert.ok(fullText.includes(hint), hint);
     const first = wide.findIndex((line) => line.includes("█"));
     const border = wide.findIndex((line) => line.includes("╭"));
     assert.equal(wide[first]!.indexOf("█"), Math.floor((160 - 60) / 2));
@@ -387,6 +466,7 @@ test("startup header keeps the wordmark and details near the top without hiding 
 
     const short = factory(tui, theme).render(120);
     assert.ok(short.length <= 18, "leave room for Pi's editor and footer");
+    assert.match(short.join("\n"), /KEYBOARD SHORTCUTS[\s\S]*\/hotkeys/);
     assert.ok(short.every((line) => visibleWidth(line) <= 120));
   } finally {
     if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;

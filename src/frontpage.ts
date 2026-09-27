@@ -1,5 +1,6 @@
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import {
+  getKeybindings,
   sliceByColumn,
   truncateToWidth,
   visibleWidth,
@@ -81,11 +82,54 @@ const commands = [
   ["/lazypi updates", "newer npm versions"],
 ] as const;
 
+function shortcuts(full: boolean): string[] {
+  if (!full) return ["", "KEYBOARD SHORTCUTS", "/hotkeys · all Pi shortcuts"];
+  const keys = getKeybindings();
+  const hint = (
+    action: Parameters<typeof keys.getKeys>[0],
+    description: string,
+  ) => {
+    const binding = keys.getKeys(action).join("/");
+    return binding ? `${binding} · ${description}` : "";
+  };
+  const clear = keys.getKeys("app.clear").join("/");
+  const cycle = [
+    ...keys.getKeys("app.model.cycleForward"),
+    ...keys.getKeys("app.model.cycleBackward"),
+  ].join("/");
+  return [
+    "",
+    "KEYBOARD SHORTCUTS",
+    ...[
+      hint("app.interrupt", "to interrupt"),
+      hint("app.clear", "to clear"),
+      clear ? `${clear} twice · exit` : "",
+      hint("app.exit", "to exit (empty)"),
+      hint("app.suspend", "to suspend"),
+      hint("tui.editor.deleteToLineEnd", "to delete to end"),
+      hint("app.thinking.cycle", "to cycle thinking level"),
+      cycle ? `${cycle} · to cycle models` : "",
+      hint("app.model.select", "to select model"),
+      hint("app.tools.expand", "to expand tools"),
+      hint("app.thinking.toggle", "to expand thinking"),
+      hint("app.editor.external", "for external editor"),
+      "/ · for commands",
+      "! · to run bash",
+      "!! · to run bash (no context)",
+      hint("app.message.followUp", "to queue follow-up"),
+      hint("app.message.dequeue", "to edit all queued messages"),
+      hint("app.clipboard.pasteImage", "to paste image (with text fallback)"),
+      "drop files · to attach",
+    ].filter(Boolean),
+  ];
+}
+
 function wideFrontpage(
   ctx: ExtensionContext,
   theme: Theme,
   width: number,
   thinkingEffort: string,
+  fullShortcuts: boolean,
 ): string[] {
   const panelWidth = Math.min(width, 112);
   const leftWidth = Math.floor((panelWidth - 7) / 2);
@@ -98,6 +142,7 @@ function wideFrontpage(
     `Thinking effort · ${thinkingEffort}`,
     path("Working directory", ctx.cwd, leftWidth),
     ...(sessionDir ? [path("Session directory", sessionDir, leftWidth)] : []),
+    ...shortcuts(fullShortcuts),
   ];
   const links = [
     "LAZYPI",
@@ -113,7 +158,7 @@ function wideFrontpage(
   const rows = Array.from(
     { length: Math.max(info.length, links.length) },
     (_, i) =>
-      `${border("│")} ${cell(info[i] ?? "", leftWidth, i === 0)} ${border("│")} ${cell(links[i] ?? "", rightWidth, i === 0)} ${border("│")}`,
+      `${border("│")} ${cell(info[i] ?? "", leftWidth, i === 0 || info[i] === "KEYBOARD SHORTCUTS")} ${border("│")} ${cell(links[i] ?? "", rightWidth, i === 0)} ${border("│")}`,
   );
   const pad = " ".repeat(Math.floor((width - panelWidth) / 2));
   const logoStart = Math.floor((width - 60) / 2);
@@ -134,9 +179,11 @@ export function frontpage(
   theme: Theme,
   width: number,
   thinkingEffort: string,
+  fullShortcuts = true,
 ): string[] {
   // Reserve room for both columns and the ascending z marks.
-  if (width >= 88) return wideFrontpage(ctx, theme, width, thinkingEffort);
+  if (width >= 88)
+    return wideFrontpage(ctx, theme, width, thinkingEffort, fullShortcuts);
   const sessionDir = ctx.sessionManager.getSessionDir();
   const grouped = width >= 32;
   const rows = [
@@ -146,6 +193,7 @@ export function frontpage(
     `Thinking effort · ${thinkingEffort}`,
     path("Cwd", ctx.cwd, width),
     ...(sessionDir ? [path("Session", sessionDir, width)] : []),
+    ...(grouped ? shortcuts(fullShortcuts) : []),
     ...(grouped ? ["", "LAZYPI"] : []),
     ...commands.map(([name, hint]) =>
       width >= 40 ? `${name} · ${hint}` : name,
@@ -153,7 +201,12 @@ export function frontpage(
   ];
   return rows.map((row, index) => {
     const line = theme.fg(
-      index === 0 || row === "SESSION" || row === "LAZYPI" ? "accent" : "text",
+      index === 0 ||
+        row === "SESSION" ||
+        row === "KEYBOARD SHORTCUTS" ||
+        row === "LAZYPI"
+        ? "accent"
+        : "text",
       truncateToWidth(plain(row), width, "…"),
     );
     return " ".repeat(Math.floor((width - visibleWidth(line)) / 2)) + line;

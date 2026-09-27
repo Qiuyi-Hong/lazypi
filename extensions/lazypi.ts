@@ -51,12 +51,12 @@ export default function (pi: ExtensionAPI) {
     ctx.ui.setHeader((tui, theme) => ({
       render(width) {
         try {
-          const lines = frontpage(
-            ctx,
-            theme,
-            width,
-            pi.getThinkingLevel?.() ?? "unknown",
-          );
+          const effort = pi.getThinkingLevel?.() ?? "unknown";
+          const full = frontpage(ctx, theme, width, effort);
+          const lines =
+            full.length <= tui.terminal.rows - 6
+              ? full
+              : frontpage(ctx, theme, width, effort, false);
           const top = Math.max(
             0,
             Math.min(2, tui.terminal.rows - lines.length - 6),
